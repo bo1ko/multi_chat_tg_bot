@@ -111,16 +111,16 @@ async def add_admin_second(message: Message, state: FSMContext):
 
             if result:
                 await message.answer(
-                    f"Адміністратор {username} успішно доданий ✅",
+                    f"Адміністратор @{username} успішно доданий ✅",
                     reply_markup=admin_managment,
                 )
             else:
                 await message.answer(
-                    f"{username} має права адміністратора", reply_markup=admin_managment
+                    f"@{username} має права адміністратора", reply_markup=admin_managment
                 )
         else:
             await message.answer(
-                f"{username} не має в базі.", reply_markup=admin_managment
+                f"@{username} не має в базі.", reply_markup=admin_managment
             )
     else:
         await message.answer(
@@ -148,13 +148,19 @@ async def remove_admin_second(message: Message, state: FSMContext):
 
     if username[0] == "@":
         username = username[1:]
+        
+        if username == message.from_user.username:
+            await message.answer('Ви не можете забрати в себе права!', reply_markup=admin_managment)
+            await state.clear()
+            return
+        
         admin = await rq.orm_get_user(value=username, get_by="name")
 
         if admin:
             if admin.is_admin:
                 await rq.orm_remove_admin(username)
                 await message.answer(
-                    f"Адміністратор {username} успішно видалений ✅",
+                    f"Адміністратор @{username} успішно видалений ✅",
                     reply_markup=admin_managment,
                 )
             else:
@@ -164,7 +170,7 @@ async def remove_admin_second(message: Message, state: FSMContext):
                 )
         else:
             await message.answer(
-                f"{username} не має в базі.", reply_markup=admin_managment
+                f"@{username} не має в базі.", reply_markup=admin_managment
             )
     else:
         await message.answer(
