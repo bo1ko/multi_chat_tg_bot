@@ -5,18 +5,22 @@ from datetime import datetime, timedelta
 import sys
 
 from aiogram import Router, types, F, Bot
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command, or_f
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from dotenv import load_dotenv
 
+from app.bots.auth import TelegramLogin
 import app.database.orm_query as rq
 from app.keyboards.reply import get_keyboard
+from app.keyboards.inline import get_callback_btns
 
 from app.filters.check_admin import IsAdmin
+from app.utils.get_account_app_data import auth_proccess
 from app.utils.helpers import clear_folder
 from app.utils.account_manager import xlsx_accounts_parser
+from app.utils.get_account_app_data import auth_proccess
 
 load_dotenv()
 
@@ -29,11 +33,13 @@ back = get_keyboard(BACK_TO_MENU["back_to_menu"])
 
 ADMIN_MENU_KB_NAMES = {
     "accounts": "Аккаунти 🔑",
+    "proxy": "Проксі 🌐",
     "session": "Сесії 💻",
     "admin panel": "Адмін панель ⚙️",
 }
 admin_menu = get_keyboard(
     ADMIN_MENU_KB_NAMES["accounts"],
+    ADMIN_MENU_KB_NAMES["proxy"],
     ADMIN_MENU_KB_NAMES["session"],
     ADMIN_MENU_KB_NAMES["admin panel"],
 )
@@ -196,14 +202,18 @@ ACCOUNT_MANAGMENT_KB_NAMES = {
     "account_list": "Список аккаунтів 📃",
     "add_accounts": "Добавити аккаунти 📲",
     "remove_account": "Видалити аккаунти 🗑️",
+    "api_auth_proccess": "Авторизація API ⚙",
+    "telegram_auth_proccess": "Авторизація Telegram 🚀",
     "back_account_managment": '⬅️ Назад до меню "Аккаунти"',
 }
 account_managment = get_keyboard(
     ACCOUNT_MANAGMENT_KB_NAMES["account_list"],
     ACCOUNT_MANAGMENT_KB_NAMES["add_accounts"],
     ACCOUNT_MANAGMENT_KB_NAMES["remove_account"],
+    ACCOUNT_MANAGMENT_KB_NAMES["api_auth_proccess"],
+    ACCOUNT_MANAGMENT_KB_NAMES["telegram_auth_proccess"],
     BACK_TO_MENU["back_to_menu"],
-    sizes=(1, 2, 1),
+    sizes=(1, 2, 2, 1),
 )
 back_account_managment = get_keyboard(
     ACCOUNT_MANAGMENT_KB_NAMES["back_account_managment"]
@@ -227,9 +237,23 @@ async def account_panel(message: Message, state: FSMContext):
 
 
 # account list
-# @router.message(ACCOUNT_MANAGMENT_KB_NAMES["account_list"] == F.text)
-# async def account_list(message: Message):
-#     accounts rq.orm_add
+@router.message(ACCOUNT_MANAGMENT_KB_NAMES["account_list"] == F.text)
+async def account_list(message: Message):
+    accounts = await rq.orm_get_all_accounts()
+
+    await message.answer("Список аккаунтів 👇", reply_markup=account_managment)
+
+    for account in accounts:
+        text = f"Номер: <code>{account.number}</code>\n"
+        text += f"Додаток створений: {'✅' if account.is_app_created else '❌'}\n"
+        if account.is_app_created:
+            text += f"API ID: <code>{account.api_id}</code>\n"
+            text += f"API HASH: <code>{account.api_hash}</code>\n"
+            text += f"Сесія створена: {'✅' if account.is_session_created else '❌'}\n"
+            if account.is_session_created:
+                text += f"ID сесіі: {account.session_id}\n"
+
+        await message.answer(text)
 
 
 # add accounts
@@ -262,17 +286,210 @@ async def add_account_second(message: Message, state: FSMContext, bot: Bot):
         == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     ):
         file_info = await bot.get_file(document.file_id)
-        clear_folder(os.getenv("EXCEL_ACCOUNTS_FOLDER"))
-        
+        clear_folder(os.getenv("EXCEL_FOLDER"))
+
         await bot.download_file(file_info.file_path, os.getenv("EXCEL_ACCOUNTS"))
-        await message.reply(f"Файл отримано", reply_markup=account_managment)
+        await message.reply(f"Файл отримано")
         result = await xlsx_accounts_parser(os.getenv("EXCEL_ACCOUNTS"))
-        
+
         if result:
-            await message.reply(f"Добавлено аккаунтів: {result}", reply_markup=account_managment)
+            await message.reply(
+                f"Добавлено аккаунтів: {result}", reply_markup=account_managment
+            )
         else:
-            await message.reply(f"Не додано жодного акаунту", reply_markup=account_managment)
-        
+            await message.reply(
+                f"Не додано жодного акаунту", reply_markup=account_managment
+            )
+
+    else:
+        await message.reply(
+            "Будь ласка, надішліть Excel файл у форматі .xlsx",
+            reply_markup=account_managment,
+        )
+    await state.clear()
+
+
+# remove accounts
+@router.message(ACCOUNT_MANAGMENT_KB_NAMES["remove_account"] == F.text)
+async def remove_account(message: Message, state: FSMContext):
+    await message.answer("Введіть номер:", reply_markup=back_account_managment)
+    await state.set_state(AccountState.remove_accounts)
+
+
+@router.message(AccountState.remove_accounts)
+async def remove_account_second(message: Message, state: FSMContext):
+    await state.update_data(number=message.text)
+    data = await state.get_data()
+    number = data.get("number")
+
+    if number is None:
+        await message.reply(
+            "Будь ласка, надішліть правильний номер.",
+            reply_markup=account_managment,
+        )
+        await state.clear()
+        return
+
+    check = await rq.orm_get_account(number)
+
+    if check:
+        await rq.orm_remove_account(number)
+        await message.reply(
+            f"Аккаунт <code>{number}</code> успішно видалений",
+            reply_markup=account_managment,
+        )
+    else:
+        await message.reply(
+            f"Аккаунт <code>{number}</code> не знайдено.",
+            reply_markup=account_managment,
+        )
+
+    await state.clear()
+
+
+# api auth
+@router.message(ACCOUNT_MANAGMENT_KB_NAMES["api_auth_proccess"] == F.text)
+async def api_auth(message: Message, state: FSMContext):
+    await message.answer(
+        "Розпочинаю API авторизацію...", reply_markup=back_account_managment
+    )
+
+
+class Auth(StatesGroup):
+    code = State()
+
+
+login_manager = TelegramLogin()
+
+
+# telegram auth
+@router.message(ACCOUNT_MANAGMENT_KB_NAMES["telegram_auth_proccess"] == F.text)
+async def api_auth(message: Message):
+    btns = {"Так": "start_auth_tg_yes", "Ні": "start_auth_tg_no"}
+    await message.answer(
+        f'Розділ "{ACCOUNT_MANAGMENT_KB_NAMES["telegram_auth_proccess"]}"',
+        reply_markup=back_account_managment,
+    )
+    await message.answer(
+        "Запутити процес авторизації?", reply_markup=get_callback_btns(btns=btns)
+    )
+
+
+@router.callback_query(F.data == "start_auth_tg_yes")
+async def start_auth_tg_yes(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await callback.message.edit_text("Розпочинаю Telegram авторизацію...")
+
+    await login_manager.start_login(callback.message, state)
+    await state.set_state(Auth.code)
+
+
+@router.callback_query(F.data == "start_auth_tg_no")
+async def start_auth_tg_no(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await callback.message.edit_text("Дію скасовано")
+    await callback.message.answer("Повертаюсь назад...", reply_markup=account_managment)
+
+
+@router.message(Auth.code)
+async def code_handler(message: types.Message, state: FSMContext):
+    if message.text and message.text.isdigit():
+        code_text = message.text
+
+        # Завершуємо авторизацію поточного акаунта та переходимо до наступного
+        await login_manager.finish_login(message, code_text)
+
+        # Очищаємо стан, щоб дозволити подальші команди
+        await state.clear()
+    else:
+        await message.answer("Будь ласка, введи коректний код підтвердження.")
+
+
+# ---------- PROXY ----------
+
+# proxy panel
+PROXY_MANAGMENT_KB_NAMES = {
+    "proxy_list": "Список проксі 📃",
+    "add_proxy": "Добавити проксі 📲",
+    "remove_proxy": "Видалити проксі 🗑️",
+    "back_proxy_managment": '⬅️ Назад до меню "Проксі"',
+}
+proxy_managment = get_keyboard(
+    PROXY_MANAGMENT_KB_NAMES["proxy_list"],
+    PROXY_MANAGMENT_KB_NAMES["add_proxy"],
+    PROXY_MANAGMENT_KB_NAMES["remove_proxy"],
+    BACK_TO_MENU["back_to_menu"],
+    sizes=(1, 2, 1),
+)
+back_account_managment = get_keyboard(
+    ACCOUNT_MANAGMENT_KB_NAMES["back_account_managment"]
+)
+
+
+class ProxyState(StatesGroup):
+    add_proxies = State()
+    remove_proxies = State()
+
+
+# proxy menu
+@router.message(
+    or_f(
+        (ADMIN_MENU_KB_NAMES["proxy"] == F.text),
+        (PROXY_MANAGMENT_KB_NAMES["back_proxy_managment"] == F.text),
+    )
+)
+async def proxy(message: Message, state: FSMContext):
+    await message.answer(
+        f'Розділ "{ADMIN_MENU_KB_NAMES["proxy"]}"', reply_markup=proxy_managment
+    )
+    await state.clear()
+
+
+# proxy add
+@router.message(PROXY_MANAGMENT_KB_NAMES["add_proxy"] == F.text)
+async def add_proxy_first(message: Message, state: FSMContext):
+    await message.answer(
+        "Надішліть базу проксі у форматі .xlsx",
+        reply_markup=back_account_managment,
+    )
+    await state.set_state(ProxyState.add_proxies)
+
+
+@router.message(ProxyState.add_proxies)
+async def add_proxy_second(message: Message, state: FSMContext, bot: Bot):
+    await state.update_data(file_name=message.document)
+    data = await state.get_data()
+    document = data.get("file_name")
+
+    if document is None:
+        await message.reply(
+            "Будь ласка, надішліть правильний файл.",
+            reply_markup=account_managment,
+        )
+        await state.clear()
+        return
+
+    # If document is lxml create async task for ChatJoiner
+    if (
+        document.mime_type
+        == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    ):
+        file_info = await bot.get_file(document.file_id)
+        clear_folder(os.getenv("EXCEL_FOLDER"))
+
+        await bot.download_file(file_info.file_path, os.getenv("EXCEL_PROXIES"))
+        await message.reply(f"Файл отримано")
+        result = await xlsx_accounts_parser(os.getenv("EXCEL_PROXIES"))
+
+        if result:
+            await message.reply(
+                f"Добавлено аккаунтів: {result}", reply_markup=account_managment
+            )
+        else:
+            await message.reply(
+                f"Не додано жодного акаунту", reply_markup=account_managment
+            )
+
     else:
         await message.reply(
             "Будь ласка, надішліть Excel файл у форматі .xlsx",

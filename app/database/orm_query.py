@@ -3,7 +3,7 @@ from typing import Union
 
 from app.database.engine import engine, session_maker
 from app.database.models import Base
-from app.database.models import User, Session, Account
+from app.database.models import User, Session, Account, Proxy
 
 
 async def create_tables():
@@ -66,7 +66,7 @@ async def orm_get_user(
                     query = select(User).where(User.name == value)
                 else:
                     return None
-                
+
                 result = await session.execute(query)
                 return result.scalar()
             except Exception as e:
@@ -153,3 +153,131 @@ async def orm_add_account(number: str):
             except Exception as e:
                 print(e)
                 return None
+
+
+# ---------- GET ALL ACCOUNTS ----------
+async def orm_get_all_accounts():
+    async with session_maker() as session:
+        async with session.begin():
+            try:
+                query = select(Account)
+                result = await session.execute(query)
+                accounts = result.scalars().all()
+                return accounts
+            except Exception as e:
+                print(e)
+                return None
+
+
+# ---------- GET ALL AUTHORIZED ACCOUNTS ----------
+async def orm_get_authorized_accounts_without_session():
+    async with session_maker() as session:
+        async with session.begin():
+            try:
+                query = select(Account).where(
+                    (Account.is_app_created == True)
+                    & (Account.is_session_created == False)
+                )
+                result = await session.execute(query)
+                accounts = result.scalars().all()
+                return accounts
+            except Exception as e:
+                print(e)
+                return None
+
+
+# ---------- GET ACCOUNT ----------
+async def orm_get_account(number: str):
+    async with session_maker() as session:
+        async with session.begin():
+            try:
+                query = select(Account).where(Account.number == number)
+                result = await session.execute(query)
+                return result.scalar()
+            except Exception as e:
+                print(e)
+                return None
+
+
+# ---------- REMOVE ACCOUNT ----------
+async def orm_remove_account(number: str):
+    async with session_maker() as session:
+        async with session.begin():
+            try:
+                query = delete(Account).where(Account.number == number)
+                await session.execute(query)
+                await session.commit()
+                return True
+            except Exception as e:
+                print(e)
+                return False
+
+
+# ---------- CHANGE ACCOUNT SESSION STATUS ----------
+async def orm_change_account_session_status(number: str, status: bool):
+    async with session_maker() as session:
+        async with session.begin():
+            try:
+                query = (
+                    update(Account)
+                    .where(Account.number == number)
+                    .values(is_session_created=status)
+                )
+                await session.execute(query)
+                await session.commit()
+                return True
+            except Exception as e:
+                print(e)
+                return False
+
+# ---------- PROXY ADD ----------
+async def orm_add_proxy(proxy: str):
+    async with session_maker() as session:
+        async with session.begin():
+            try:
+                obj = Proxy(proxy=proxy)
+                session.add(obj)
+                await session.commit()
+                return obj
+            except Exception as e:
+                print(e)
+                return None
+
+# ---------- GET ALL PROXIES ----------
+async def orm_get_all_proxies():
+    async with session_maker() as session:
+        async with session.begin():
+            try:
+                query = select(Proxy)
+                result = await session.execute(query)
+                proxies = result.scalars().all()
+                return proxies
+            except Exception as e:
+                print(e)
+                return None
+
+# ---------- GET PROXY ----------
+async def orm_get_proxy(proxy: str):
+    async with session_maker() as session:
+        async with session.begin():
+            try:
+                query = select(Proxy).where(Proxy.proxy == proxy)
+                result = await session.execute(query)
+                return result.scalar()
+            except Exception as e:
+                print(e)
+                return None
+
+
+# ---------- REMOVE PROXY ----------
+async def orm_remove_proxy(proxy: str):
+    async with session_maker() as session:
+        async with session.begin():
+            try:
+                query = delete(Proxy).where(Proxy.proxy == proxy)
+                await session.execute(query)
+                await session.commit()
+                return True
+            except Exception as e:
+                print(e)
+                return False

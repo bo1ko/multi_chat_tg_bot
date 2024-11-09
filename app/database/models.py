@@ -48,15 +48,29 @@ class Session(Base):
 
 class Account(Base):
     __tablename__ = "accounts"
-    
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     number: Mapped[str] = mapped_column(String(255), unique=True)
     is_app_created: Mapped[bool] = mapped_column(Boolean, default=False)
     api_id: Mapped[str] = mapped_column(Text, nullable=True)
     api_hash: Mapped[str] = mapped_column(Text, nullable=True)
     is_session_created: Mapped[bool] = mapped_column(Boolean, default=False)
-    session_id: Mapped[int] = mapped_column(Integer, ForeignKey('sessions.id', ondelete='CASCADE'), nullable=True)  
+    session_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("sessions.id", ondelete="CASCADE"), nullable=True
+    )
 
+
+class Proxy(Base):
+    __tablename__ = "proxies"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    proxy_url: Mapped[str] = mapped_column(String(255), unique=True)
+    session_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("sessions.id", ondelete="CASCADE"), nullable=True
+    )
+    account_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=True
+    )
 
 """
 Session
