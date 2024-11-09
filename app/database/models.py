@@ -1,10 +1,24 @@
-from sqlalchemy import DateTime, String, func, Integer, Boolean, ForeignKey, ARRAY, BigInteger
+from sqlalchemy import (
+    DateTime,
+    String,
+    func,
+    Integer,
+    Boolean,
+    ForeignKey,
+    ARRAY,
+    BigInteger,
+    Text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.ext.mutable import MutableList
 
+
 class Base(DeclarativeBase):
     created: Mapped[DateTime] = mapped_column(DateTime, default=func.now())
-    updated: Mapped[DateTime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
+    updated: Mapped[DateTime] = mapped_column(
+        DateTime, default=func.now(), onupdate=func.now()
+    )
+
 
 class MutableArray(MutableList):
     @classmethod
@@ -13,10 +27,53 @@ class MutableArray(MutableList):
             value = MutableList(value)
         return super(MutableArray, cls).coerce(key, value)
 
+
 class User(Base):
-    __tablename__ = 'users'
+    __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     tg_id: Mapped[int] = mapped_column(BigInteger, unique=True)
     name: Mapped[str] = mapped_column(String(255), nullable=True)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class Session(Base):
+    __tablename__ = "sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_type: Mapped[str] = mapped_column(String(255))
+    prompt: Mapped[str] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class Account(Base):
+    __tablename__ = "accounts"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    number: Mapped[str] = mapped_column(String(255), unique=True)
+    is_app_created: Mapped[bool] = mapped_column(Boolean, default=False)
+    api_id: Mapped[str] = mapped_column(Text, nullable=True)
+    api_hash: Mapped[str] = mapped_column(Text, nullable=True)
+    is_session_created: Mapped[bool] = mapped_column(Boolean, default=False)
+    session_id: Mapped[int] = mapped_column(Integer, ForeignKey('sessions.id', ondelete='CASCADE'), nullable=True)  
+
+
+"""
+Session
+id int
+session_type str
+prompt str
+is_active bool
+
+Phone
+id int
+number str
+is_app_created boolean
+api_id str
+api_hash str
+is_session_created boolean
+session_id foreign
+
+Proxy
+
+"""

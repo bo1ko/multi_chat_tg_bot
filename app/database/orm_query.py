@@ -3,7 +3,7 @@ from typing import Union
 
 from app.database.engine import engine, session_maker
 from app.database.models import Base
-from app.database.models import User
+from app.database.models import User, Session, Account
 
 
 async def create_tables():
@@ -139,3 +139,17 @@ async def orm_get_all_admins():
                 return admins
             except Exception as e:
                 print(e)
+
+
+# ---------- ADD ACCOUNT ----------
+async def orm_add_account(number: str):
+    async with session_maker() as session:
+        async with session.begin():
+            try:
+                obj = Account(number=number)
+                session.add(obj)
+                await session.commit()
+                return obj
+            except Exception as e:
+                print(e)
+                return None

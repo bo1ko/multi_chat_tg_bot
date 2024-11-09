@@ -15,6 +15,8 @@ import app.database.orm_query as rq
 from app.keyboards.reply import get_keyboard
 
 from app.filters.check_admin import IsAdmin
+from app.utils.helpers import clear_folder
+from app.utils.account_manager import xlsx_accounts_parser
 
 load_dotenv()
 
@@ -25,8 +27,13 @@ router.message.filter(IsAdmin())
 BACK_TO_MENU = {"back_to_menu": "⬅️ Назад в меню"}
 back = get_keyboard(BACK_TO_MENU["back_to_menu"])
 
-ADMIN_MENU_KB_NAMES = {"session": "Сесія 💻", "admin panel": "Адмін панель ⚙️"}
+ADMIN_MENU_KB_NAMES = {
+    "accounts": "Аккаунти 🔑",
+    "session": "Сесії 💻",
+    "admin panel": "Адмін панель ⚙️",
+}
 admin_menu = get_keyboard(
+    ADMIN_MENU_KB_NAMES["accounts"],
     ADMIN_MENU_KB_NAMES["session"],
     ADMIN_MENU_KB_NAMES["admin panel"],
 )
@@ -116,7 +123,8 @@ async def add_admin_second(message: Message, state: FSMContext):
                 )
             else:
                 await message.answer(
-                    f"@{username} має права адміністратора", reply_markup=admin_managment
+                    f"@{username} має права адміністратора",
+                    reply_markup=admin_managment,
                 )
         else:
             await message.answer(
@@ -127,7 +135,7 @@ async def add_admin_second(message: Message, state: FSMContext):
             "Ви ввели некоректний юзернейм, спробуйте знову.",
             reply_markup=admin_managment,
         )
-    
+
     await state.clear()
 
 
@@ -148,12 +156,14 @@ async def remove_admin_second(message: Message, state: FSMContext):
 
     if username[0] == "@":
         username = username[1:]
-        
+
         if username == message.from_user.username:
-            await message.answer('Ви не можете забрати в себе права!', reply_markup=admin_managment)
+            await message.answer(
+                "Ви не можете забрати в себе права!", reply_markup=admin_managment
+            )
             await state.clear()
             return
-        
+
         admin = await rq.orm_get_user(value=username, get_by="name")
 
         if admin:
@@ -177,11 +187,125 @@ async def remove_admin_second(message: Message, state: FSMContext):
             "Ви ввели некоректний юзернейм, спробуйте знову.",
             reply_markup=admin_managment,
         )
-    
+
     await state.clear()
 
 
-# session menu
-# @router.message(ADMIN_MENU_KB_NAMES["session"] == F.text)
-# async def cmd_session(message: Message, state: FSMContext):
-#     await message.answer('Розділ "Сесія"', reply_markup=admin_managment)
+# account panel
+ACCOUNT_MANAGMENT_KB_NAMES = {
+    "account_list": "Список аккаунтів 📃",
+    "add_accounts": "Добавити аккаунти 📲",
+    "remove_account": "Видалити аккаунти 🗑️",
+    "back_account_managment": '⬅️ Назад до меню "Аккаунти"',
+}
+account_managment = get_keyboard(
+    ACCOUNT_MANAGMENT_KB_NAMES["account_list"],
+    ACCOUNT_MANAGMENT_KB_NAMES["add_accounts"],
+    ACCOUNT_MANAGMENT_KB_NAMES["remove_account"],
+    BACK_TO_MENU["back_to_menu"],
+    sizes=(1, 2, 1),
+)
+back_account_managment = get_keyboard(
+    ACCOUNT_MANAGMENT_KB_NAMES["back_account_managment"]
+)
+
+
+class AccountState(StatesGroup):
+    add_accounts = State()
+    remove_accounts = State()
+
+
+@router.message(
+    or_f(
+        (ADMIN_MENU_KB_NAMES["accounts"] == F.text),
+        (ACCOUNT_MANAGMENT_KB_NAMES["back_account_managment"] == F.text),
+    )
+)
+async def account_panel(message: Message, state: FSMContext):
+    await message.answer('Розділ "Аккаунти 🔑"', reply_markup=account_managment)
+    await state.clear()
+
+
+# account list
+# @router.message(ACCOUNT_MANAGMENT_KB_NAMES["account_list"] == F.text)
+# async def account_list(message: Message):
+#     accounts rq.orm_add
+
+
+# add accounts
+@router.message(ACCOUNT_MANAGMENT_KB_NAMES["add_accounts"] == F.text)
+async def add_account_first(message: Message, state: FSMContext):
+    await message.answer(
+        "Надішліть базу номерів у форматі .xlsx",
+        reply_markup=back_account_managment,
+    )
+    await state.set_state(AccountState.add_accounts)
+
+
+@router.message(AccountState.add_accounts)
+async def add_account_second(message: Message, state: FSMContext, bot: Bot):
+    await state.update_data(file_name=message.document)
+    data = await state.get_data()
+    document = data.get("file_name")
+
+    if document is None:
+        await message.reply(
+            "Будь ласка, надішліть правильний файл.",
+            reply_markup=account_managment,
+        )
+        await state.clear()
+        return
+
+    # If document is lxml create async task for ChatJoiner
+    if (
+        document.mime_type
+        == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    ):
+        file_info = await bot.get_file(document.file_id)
+        clear_folder(os.getenv("EXCEL_ACCOUNTS_FOLDER"))
+        
+        await bot.download_file(file_info.file_path, os.getenv("EXCEL_ACCOUNTS"))
+        await message.reply(f"Файл отримано", reply_markup=account_managment)
+        result = await xlsx_accounts_parser(os.getenv("EXCEL_ACCOUNTS"))
+        
+        if result:
+            await message.reply(f"Добавлено аккаунтів: {result}", reply_markup=account_managment)
+        else:
+            await message.reply(f"Не додано жодного акаунту", reply_markup=account_managment)
+        
+    else:
+        await message.reply(
+            "Будь ласка, надішліть Excel файл у форматі .xlsx",
+            reply_markup=account_managment,
+        )
+    await state.clear()
+
+
+# session panel
+# SESSION_MANAGMENT_KB_NAMES = {
+#     "add_session": "Добавити сесію ✒",
+#     "remove_session": "Видалити сесію 🗑️",
+#     "session_list": "Список сесій 📃",
+#     "back_session_managment": "⬅️ Назад до панелі сесій",
+# }
+# session_managment = get_keyboard(
+#     SESSION_MANAGMENT_KB_NAMES["session_list"],
+#     SESSION_MANAGMENT_KB_NAMES["add_session"],
+#     SESSION_MANAGMENT_KB_NAMES["remove_session"],
+#     BACK_TO_MENU["back_to_menu"],
+#     sizes=(1, 2, 1),
+# )
+# back_session_managment = get_keyboard(
+#     SESSION_MANAGMENT_KB_NAMES["back_session_managment"]
+# )
+
+# # session panel
+# @router.message(
+#     or_f(
+#         (ADMIN_MENU_KB_NAMES["session"] == F.text),
+#         (SESSION_MANAGMENT_KB_NAMES["back_session_managment"] == F.text),
+#     )
+# )
+# async def session_panel(message: Message, state: FSMContext):
+#     await message.answer('Розділ "Сесії 💻"', reply_markup=session_managment)
+#     await state.clear()

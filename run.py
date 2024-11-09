@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from app.middlewares.db import DataBaseSession
 from app.database.engine import session_maker
 from app.common.bot_cmds_list import private
-from app.database.engine import create_db
+from app.database.engine import create_db, drop_db
 from app.handlers.admin_handler import router as admin_router
 from app.handlers.user_handler import router as user_router
 
@@ -18,7 +18,7 @@ load_dotenv()
 
 # LOGGING
 logging.basicConfig(
-    level=logging.INFO,  # Logging level
+    level=logging.WARNING,  # Logging level
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[
         logging.FileHandler("bot.log", encoding="utf-8"),

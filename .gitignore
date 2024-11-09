@@ -4,3 +4,5 @@
 .env
 bot.log
 __pycache__
+excel/
+test.xlsx
