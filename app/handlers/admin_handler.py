@@ -17,10 +17,8 @@ from app.keyboards.reply import get_keyboard
 from app.keyboards.inline import get_callback_btns
 
 from app.filters.check_admin import IsAdmin
-from app.utils.get_account_app_data import auth_proccess
 from app.utils.helpers import clear_folder
-from app.utils.account_manager import xlsx_accounts_parser
-from app.utils.get_account_app_data import auth_proccess
+from app.utils.account_manager import xlsx_accounts_parser, xlsx_proxies_parser
 
 load_dotenv()
 
@@ -346,7 +344,6 @@ async def remove_account_second(message: Message, state: FSMContext):
 
     await state.clear()
 
-
 # api auth
 @router.message(ACCOUNT_MANAGMENT_KB_NAMES["api_auth_proccess"] == F.text)
 async def api_auth(message: Message, state: FSMContext):
@@ -421,8 +418,8 @@ proxy_managment = get_keyboard(
     BACK_TO_MENU["back_to_menu"],
     sizes=(1, 2, 1),
 )
-back_account_managment = get_keyboard(
-    ACCOUNT_MANAGMENT_KB_NAMES["back_account_managment"]
+back_proxy_managment = get_keyboard(
+    PROXY_MANAGMENT_KB_NAMES["back_proxy_managment"]
 )
 
 
@@ -450,11 +447,12 @@ async def proxy(message: Message, state: FSMContext):
 async def add_proxy_first(message: Message, state: FSMContext):
     await message.answer(
         "Надішліть базу проксі у форматі .xlsx",
-        reply_markup=back_account_managment,
+        reply_markup=back_proxy_managment,
     )
     await state.set_state(ProxyState.add_proxies)
 
 
+# proxy add second
 @router.message(ProxyState.add_proxies)
 async def add_proxy_second(message: Message, state: FSMContext, bot: Bot):
     await state.update_data(file_name=message.document)
@@ -464,7 +462,7 @@ async def add_proxy_second(message: Message, state: FSMContext, bot: Bot):
     if document is None:
         await message.reply(
             "Будь ласка, надішліть правильний файл.",
-            reply_markup=account_managment,
+            reply_markup=proxy_managment,
         )
         await state.clear()
         return
@@ -479,25 +477,63 @@ async def add_proxy_second(message: Message, state: FSMContext, bot: Bot):
 
         await bot.download_file(file_info.file_path, os.getenv("EXCEL_PROXIES"))
         await message.reply(f"Файл отримано")
-        result = await xlsx_accounts_parser(os.getenv("EXCEL_PROXIES"))
+        result = await xlsx_proxies_parser(os.getenv("EXCEL_PROXIES"))
 
         if result:
             await message.reply(
-                f"Добавлено аккаунтів: {result}", reply_markup=account_managment
+                f"Добавлено проксі: {result}", reply_markup=proxy_managment
             )
         else:
             await message.reply(
-                f"Не додано жодного акаунту", reply_markup=account_managment
+                f"Не додано жодного проксі", reply_markup=proxy_managment
             )
 
     else:
         await message.reply(
             "Будь ласка, надішліть Excel файл у форматі .xlsx",
-            reply_markup=account_managment,
+            reply_markup=proxy_managment,
         )
     await state.clear()
 
 
+# proxy list
+@router.message(PROXY_MANAGMENT_KB_NAMES["proxy_list"] == F.text)
+async def proxy_list(message: Message):
+    proxies = await rq.orm_get_all_proxies()
+    text = "Список проксі\n\n"
+
+    for proxy in proxies:
+        text += f"<code>{proxy.proxy_url}</code>\n"
+
+    await message.answer(text, reply_markup=proxy_managment)
+
+# proxy remove
+@router.message(PROXY_MANAGMENT_KB_NAMES["remove_proxy"] == F.text)
+async def remove_proxy_first(message: Message, state: FSMContext):
+    await message.answer("Введіть проксі", reply_markup=back_proxy_managment)
+    await state.set_state(ProxyState.remove_proxies)
+
+@router.message(ProxyState.remove_proxies)
+async def remove_proxy_second(message: Message, state: FSMContext):
+    await state.update_data(proxy=message.text)
+    data = await state.get_data()
+    proxy = data.get("proxy")
+
+    check = await rq.orm_get_proxy(proxy)
+
+    if check:
+        await rq.orm_remove_proxy(proxy)
+        await message.reply(
+            f"Проксі <code>{proxy}</code> успішно видалений",
+            reply_markup=proxy_managment,
+        )
+    else:
+        await message.reply(
+            f"Проксі <code>{proxy}</code> не знайдено",
+            reply_markup=proxy_managment,
+        )
+
+    await state.clear()
 # session panel
 # SESSION_MANAGMENT_KB_NAMES = {
 #     "add_session": "Добавити сесію ✒",

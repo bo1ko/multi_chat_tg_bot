@@ -235,7 +235,7 @@ async def orm_add_proxy(proxy: str):
     async with session_maker() as session:
         async with session.begin():
             try:
-                obj = Proxy(proxy=proxy)
+                obj = Proxy(proxy_url=proxy)
                 session.add(obj)
                 await session.commit()
                 return obj
@@ -261,7 +261,7 @@ async def orm_get_proxy(proxy: str):
     async with session_maker() as session:
         async with session.begin():
             try:
-                query = select(Proxy).where(Proxy.proxy == proxy)
+                query = select(Proxy).where(Proxy.proxy_url == proxy)
                 result = await session.execute(query)
                 return result.scalar()
             except Exception as e:
@@ -274,7 +274,7 @@ async def orm_remove_proxy(proxy: str):
     async with session_maker() as session:
         async with session.begin():
             try:
-                query = delete(Proxy).where(Proxy.proxy == proxy)
+                query = delete(Proxy).where(Proxy.proxy_url == proxy)
                 await session.execute(query)
                 await session.commit()
                 return True
