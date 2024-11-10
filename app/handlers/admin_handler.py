@@ -17,6 +17,7 @@ from app.keyboards.reply import get_keyboard
 from app.keyboards.inline import get_callback_btns
 
 from app.filters.check_admin import IsAdmin
+from app.bots.get_account_app_data import AuthTgAPI
 from app.utils.helpers import clear_folder
 from app.utils.account_manager import xlsx_accounts_parser, xlsx_proxies_parser
 
@@ -344,19 +345,14 @@ async def remove_account_second(message: Message, state: FSMContext):
 
     await state.clear()
 
-# api auth
-@router.message(ACCOUNT_MANAGMENT_KB_NAMES["api_auth_proccess"] == F.text)
-async def api_auth(message: Message, state: FSMContext):
-    await message.answer(
-        "Розпочинаю API авторизацію...", reply_markup=back_account_managment
-    )
 
-
+# ---------- TG AUTH ----------
 class Auth(StatesGroup):
     code = State()
 
 
 login_manager = TelegramLogin()
+auth_task = None
 
 
 # telegram auth
@@ -374,10 +370,13 @@ async def api_auth(message: Message):
 
 @router.callback_query(F.data == "start_auth_tg_yes")
 async def start_auth_tg_yes(callback: CallbackQuery, state: FSMContext):
+    global auth_task
+
     await callback.answer()
     await callback.message.edit_text("Розпочинаю Telegram авторизацію...")
 
-    await login_manager.start_login(callback.message, state)
+    # await login_manager.start_login(callback.message, state)
+    auth_task = asyncio.create_task(login_manager.start_login(callback.message, state))
     await state.set_state(Auth.code)
 
 
@@ -391,12 +390,11 @@ async def start_auth_tg_no(callback: CallbackQuery, state: FSMContext):
 @router.message(Auth.code)
 async def code_handler(message: types.Message, state: FSMContext):
     if message.text and message.text.isdigit():
+        global auth_task
+
         code_text = message.text
+        auth_task = await login_manager.finish_login(message, code_text)
 
-        # Завершуємо авторизацію поточного акаунта та переходимо до наступного
-        await login_manager.finish_login(message, code_text)
-
-        # Очищаємо стан, щоб дозволити подальші команди
         await state.clear()
     else:
         await message.answer("Будь ласка, введи коректний код підтвердження.")
@@ -418,9 +416,7 @@ proxy_managment = get_keyboard(
     BACK_TO_MENU["back_to_menu"],
     sizes=(1, 2, 1),
 )
-back_proxy_managment = get_keyboard(
-    PROXY_MANAGMENT_KB_NAMES["back_proxy_managment"]
-)
+back_proxy_managment = get_keyboard(PROXY_MANAGMENT_KB_NAMES["back_proxy_managment"])
 
 
 class ProxyState(StatesGroup):
@@ -436,6 +432,9 @@ class ProxyState(StatesGroup):
     )
 )
 async def proxy(message: Message, state: FSMContext):
+    global auth_task
+    auth_task = None
+
     await message.answer(
         f'Розділ "{ADMIN_MENU_KB_NAMES["proxy"]}"', reply_markup=proxy_managment
     )
@@ -507,11 +506,13 @@ async def proxy_list(message: Message):
 
     await message.answer(text, reply_markup=proxy_managment)
 
+
 # proxy remove
 @router.message(PROXY_MANAGMENT_KB_NAMES["remove_proxy"] == F.text)
 async def remove_proxy_first(message: Message, state: FSMContext):
     await message.answer("Введіть проксі", reply_markup=back_proxy_managment)
     await state.set_state(ProxyState.remove_proxies)
+
 
 @router.message(ProxyState.remove_proxies)
 async def remove_proxy_second(message: Message, state: FSMContext):
@@ -534,6 +535,59 @@ async def remove_proxy_second(message: Message, state: FSMContext):
         )
 
     await state.clear()
+
+
+# ---------- API AUTH ----------
+class APIAuth(StatesGroup):
+    code = State()
+
+
+api_login_manager = AuthTgAPI()
+api_auth_task = None
+
+
+# api auth panel
+@router.message(ACCOUNT_MANAGMENT_KB_NAMES["api_auth_proccess"] == F.text)
+async def api_auth(message: Message):
+    btns = {"Так": "start_api_auth_tg_yes", "Ні": "start_api_auth_tg_no"}
+    await message.answer(
+        f'Розділ "{ACCOUNT_MANAGMENT_KB_NAMES["api_auth_proccess"]}"',
+        reply_markup=back_account_managment,
+    )
+    await message.answer(
+        "Запутити процес авторизації API?", reply_markup=get_callback_btns(btns=btns)
+    )
+
+
+@router.callback_query(F.data == "start_api_auth_tg_yes")
+async def start_auth_tg_yes(callback: CallbackQuery, state: FSMContext):
+    global api_auth_task
+
+    await callback.answer()
+    await callback.message.edit_text("Розпочинаю Telegram API авторизацію...")
+
+    await api_login_manager.start_login(callback.message)
+    # api_auth_task = asyncio.create_task(api_login_manager.first_step(callback.message))
+    await state.set_state(APIAuth.code)
+
+
+@router.callback_query(F.data == "start_api_auth_tg_no")
+async def start_auth_tg_no(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.edit_text("Дію скасовано")
+    await callback.message.answer("Повертаюсь назад...", reply_markup=account_managment)
+
+
+@router.message(APIAuth.code)
+async def code_handler(message: types.Message, state: FSMContext):
+    global auth_task
+
+    code_text = message.text
+    auth_task = await api_login_manager.second_step(message, code_text)
+
+    await state.clear()
+
+
 # session panel
 # SESSION_MANAGMENT_KB_NAMES = {
 #     "add_session": "Добавити сесію ✒",

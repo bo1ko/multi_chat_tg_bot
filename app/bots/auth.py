@@ -17,7 +17,7 @@ class TelegramLogin:
     async def initialize_accounts(self):
         self.accounts = await rq.orm_get_authorized_accounts_without_session()
 
-    async def start_login(self, message: Message, state: FSMContext):
+    async def start_login(self, message: Message):
         await self.initialize_accounts()
         
         # Перевіряємо, чи є акаунти для обробки

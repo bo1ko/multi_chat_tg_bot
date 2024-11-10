@@ -169,6 +169,20 @@ async def orm_get_all_accounts():
                 return None
 
 
+# ---------- GET ALL WITHOUT AUTHORIZED ACCOUNTS ----------
+async def orm_get_all_accounts_without_session():
+    async with session_maker() as session:
+        async with session.begin():
+            try:
+                query = select(Account).where(Account.is_app_created == False)
+                result = await session.execute(query)
+                accounts = result.scalars().all()
+                return accounts
+            except Exception as e:
+                print(e)
+                return None
+
+
 # ---------- GET ALL AUTHORIZED ACCOUNTS ----------
 async def orm_get_authorized_accounts_without_session():
     async with session_maker() as session:
@@ -230,6 +244,7 @@ async def orm_change_account_session_status(number: str, status: bool):
                 print(e)
                 return False
 
+
 # ---------- PROXY ADD ----------
 async def orm_add_proxy(proxy: str):
     async with session_maker() as session:
@@ -243,6 +258,7 @@ async def orm_add_proxy(proxy: str):
                 print(e)
                 return None
 
+
 # ---------- GET ALL PROXIES ----------
 async def orm_get_all_proxies():
     async with session_maker() as session:
@@ -255,6 +271,7 @@ async def orm_get_all_proxies():
             except Exception as e:
                 print(e)
                 return None
+
 
 # ---------- GET PROXY ----------
 async def orm_get_proxy(proxy: str):
@@ -281,3 +298,21 @@ async def orm_remove_proxy(proxy: str):
             except Exception as e:
                 print(e)
                 return False
+
+
+# ---------- ADD API ----------
+async def orm_add_api(number: str, api_id: str, api_hash: str):
+    async with session_maker() as session:
+        async with session.begin():
+            try:
+                query = (
+                    update(Account)
+                    .where(Account.number == number)
+                    .values(is_app_created=True, api_id=api_id, api_hash=api_hash)
+                )
+                await session.execute(query)
+                await session.commit()
+                return True
+            except Exception as e:
+                print(e)
+                return None
