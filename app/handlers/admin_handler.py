@@ -425,43 +425,6 @@ async def code_handler(message: types.Message, state: FSMContext):
         await message.answer("Будь ласка, введи коректний код підтвердження.")
 
 
-# ---------- SET ACCOUNT PROXY ----------
-SET_ACCOUNT_PROXY_KB_NAMES = {
-    "add_proxy": "Встановити проксі 📲",
-    "remove_proxy": "Видалити проксі 🗑️",
-    "back_set_account_proxy": '⬅️ Назад до меню "Встановити проксі"',
-}
-set_account_proxy_menu = get_keyboard(
-    SET_ACCOUNT_PROXY_KB_NAMES["add_proxy"],
-    SET_ACCOUNT_PROXY_KB_NAMES["remove_proxy"],
-    ACCOUNT_MANAGMENT_KB_NAMES["back_account_managment"],
-    sizes=(2, 1),
-)
-back_to_set_account_proxy = get_keyboard(
-    SET_ACCOUNT_PROXY_KB_NAMES["back_set_account_proxy"]
-)
-
-
-@router.message(ACCOUNT_MANAGMENT_KB_NAMES["set_proxy"] == F.text)
-async def set_account_proxy(message: Message, state: FSMContext):
-    await message.answer(
-        "Ви переходите до меню 'Встановити проксі'", reply_markup=set_account_proxy_menu
-    )
-    await state.clear()
-
-
-@router.message(SET_ACCOUNT_PROXY_KB_NAMES["add_proxy"] == F.text)
-async def add_proxy(message: Message, state: FSMContext):
-    for account in await rq.orm_get_specific_accounts():
-        ...
-    await message.answer("Введіть проксі", reply_markup=back_to_set_account_proxy)
-
-
-@router.message(SET_ACCOUNT_PROXY_KB_NAMES["remove_proxy"] == F.text)
-async def remove_proxy(message: Message, state: FSMContext):
-    await message.answer("Введіть проксі", reply_markup=back_to_set_account_proxy)
-
-
 # ---------- API AUTH ----------
 class APIAuth(StatesGroup):
     auth_status = State()
@@ -537,7 +500,7 @@ SESSION_MANAGMENT_KB_NAMES = {
     "add_session": "Добавити сесію 💻",
     "remove_session": "Видалити сесію 🗑️",
     "session_list": "Список сесій 📕",
-    'step_back': 'Назад',
+    "step_back": "Крок назад",
     "back_session_managment": "⬅️ Назад до панелі сесій",
 }
 session_managment = get_keyboard(
@@ -548,7 +511,9 @@ session_managment = get_keyboard(
     sizes=(1, 2, 1),
 )
 back_session_managment = get_keyboard(
-    SESSION_MANAGMENT_KB_NAMES["back_session_managment"]
+    SESSION_MANAGMENT_KB_NAMES["step_back"],
+    SESSION_MANAGMENT_KB_NAMES["back_session_managment"],
+    sizes=(1, 1),
 )
 
 
@@ -560,6 +525,13 @@ class SessionState(StatesGroup):
     answer_time = State()
 
     remove_session = State()
+
+    texts = {
+        "SessionState:session_type": "Введіть тип сесії заново:",
+        "SessionState:prompt": "Введіть промпт заново:",
+        "SessionState:chat_url": "Введіть посилання на чат заново:",
+        "SessionState:answer_time": "Введіть проміжок часу між відповідями користувачів заново:",
+    }
 
 
 # session panel
@@ -575,10 +547,32 @@ async def session_panel(message: Message, state: FSMContext):
 
 
 # add session
-@router.message(SESSION_MANAGMENT_KB_NAMES["add_session"] == F.text)
+@router.message(StateFilter(None), SESSION_MANAGMENT_KB_NAMES["add_session"] == F.text)
 async def add_session_first(message: Message, state: FSMContext):
     await message.answer("Введіть назву сесії 👇", reply_markup=back_session_managment)
     await state.set_state(SessionState.session_type)
+
+
+@router.message(StateFilter("*"), F.text.casefold() == "крок назад")
+async def back_step_handler(message: types.Message, state: FSMContext):
+
+    current_state = await state.get_state()
+    print("!" * 10, current_state)
+    if current_state == SessionState.session_type:
+        await message.answer(
+            "Попередній крок відсутній, або введіть назву сесії, або вийдіть в меню"
+        )
+        return
+
+    previous = None
+    for step in SessionState.__all_states__:
+        if step.state == current_state:
+            await state.set_state(previous)
+            await message.answer(
+                f"Ок, ви повернулися до попереднього кроку \n{SessionState.texts[previous.state]}"
+            )
+            return
+        previous = step
 
 
 @router.message(SessionState.session_type)
@@ -587,12 +581,27 @@ async def add_session_second(message: Message, state: FSMContext):
     await message.answer("Введіть промпт 👇", reply_markup=back_session_managment)
     await state.set_state(SessionState.prompt)
 
-@router.message(SessionState.prompt)
+
+@router.message(SessionState.prompt, F.text)
 async def add_session_third(message: Message, state: FSMContext):
     prompt = message.text
-    
+
     result = await generate_dialogs(prompt, message, back_session_managment)
+
+    if not result:
+        await message.answer(
+            "Помилка при отриманні JSON з відповіді GPT. Спробуйте ще раз згенерувати діалог.\n\nВведіть промпт 👇",
+            reply_markup=back_session_managment,
+        )
+        return
+
     await state.update_data(data_json=result)
+
+
+@router.message(SessionState.prompt)
+async def add_session_fifth_wrong(message: types.Message):
+    await message.answer("Ви ввели недопустимі дані, введіть провіжок часу знову")
+
 
 @router.callback_query(F.data == "use_dialog")
 async def use_dialog(callback: CallbackQuery, state: FSMContext):
@@ -613,79 +622,106 @@ async def dont_use_dialog(callback: CallbackQuery, state: FSMContext):
     await add_session_second(callback.message, state)
 
 
-@router.message(SessionState.chat_url)
+@router.message(SessionState.chat_url, F.text)
 async def add_session_fourth(message: Message, state: FSMContext):
     url = message.text
 
     if validators.url(url):
         await message.answer("Юрл підійшов", reply_markup=back_session_managment)
         await state.update_data(chat_url=message.text)
-        
-        await message.answer('Введіть проміжок часу між відповідями користувачів (секунди)\nПриклад: 60-120, 35-60, 20-30', reply_markup=back_session_managment)
+
+        await message.answer(
+            "Введіть проміжок часу між відповідями користувачів (секунди)\nПриклад: 60-120, 35-60, 20-30",
+            reply_markup=back_session_managment,
+        )
         await state.set_state(SessionState.answer_time)
     else:
-        await message.answer("Юрл не валідний", reply_markup=back_session_managment)
+        await message.answer(
+            "Юрл не валідний, введіть юрл чату знову",
+            reply_markup=back_session_managment,
+        )
         return
 
-@router.message(SessionState.answer_time)
+
+@router.message(SessionState.chat_url)
+async def add_session_fifth_wrong(message: types.Message):
+    await message.answer("Ви ввели недопустимі дані, введіть юрл чату знову")
+
+
+@router.message(SessionState.answer_time, F.text)
 async def add_session_fifth(message: Message, state: FSMContext):
-    answer_time = message.text.split('-')
-    
-    if int(answer_time[0]) <= int(answer_time[1]):
-        await message.answer("Введіть правильний проміжок часу між відповідями користувачів", reply_markup=back_session_managment)
+    answer_time = message.text.split("-")
+
+    if len(answer_time) != 2:
+        await message.answer(
+            "Введіть правильний проміжок часу між відповідями користувачів",
+            reply_markup=back_session_managment,
+        )
+        return
+
+    print("!" * 10, int(answer_time[0]) <= int(answer_time[1]))
+    if int(answer_time[0]) >= int(answer_time[1]):
+        await message.answer(
+            "Введіть правильний проміжок часу між відповідями користувачів",
+            reply_markup=back_session_managment,
+        )
+        return
+
     await state.update_data(answer_time=message.text)
-    data_str = await state.get_value('data_json')
-    data_json = ast.literal_eval(data_str)
-    
-    print('!' * 10, type(data_json))
-    
-    unique_users = [message['user_id'] for message in data_json]
-    
-    await message.answer('Починаю розприділяти ролі між аккаунтами', reply_markup=back_session_managment)
-    accounts = await rq.orm_get_specific_accounts(is_session_created=True)
-    account_list = []
 
+    data = await state.get_data()
 
-    if accounts:
-        for account in accounts:
-            if not account.is_active:
-                account_list.append(account)
-    
-    if len(account_list) < len(unique_users):
-        await message.answer('Недостатньо вільних аккаунтів! Спочатку авторизуйте аккаунти', reply_markup=session_managment)
-        await state.clear()
-        return
-    
-    await roles_distribution()
+    session_type = data.get("session_type")
+    data_json = data.get("data_json")
+    chat_url = data.get("chat_url")
 
-@router.message(StateFilter('*'), F.text.casefold() == "отмена")
-async def cancel_handler(message: types.Message, state: FSMContext) -> None:
+    add_session = await rq.orm_add_session(
+        session_type, data_json, chat_url, message.text
+    )
 
-    current_state = await state.get_state()
-    if current_state is None:
-        return
+    if add_session:
+        await message.answer("Сесія збережена!")
+        await message.answer(
+            f"Назва: {session_type}\nЮрл чату: {chat_url}\nСередній час відповіді: {message.text}",
+            reply_markup=session_managment,
+        )
+    else:
+        await message.answer("Щось пішло не так.. Спробуйте знову!")
 
     await state.clear()
-    await message.answer("Действия отменены", reply_markup=session_managment)
 
-@router.message(StateFilter('*'), F.text.casefold() == "назад")
-async def back_step_handler(message: types.Message, state: FSMContext) -> None:
+    # data_str = await state.get_value("data_json")
+    # data_json = ast.literal_eval(data_str)
 
-    current_state = await state.get_state()
+    # unique_users = [message["user_id"] for message in data_json]
 
-    if current_state == SessionState.name:
-        await message.answer('Предидущего шага нет, или введите название товара или напишите "отмена"')
-        return
+    # await message.answer(
+    #     "Починаю розприділяти ролі між аккаунтами", reply_markup=back_session_managment
+    # )
+    # accounts = await rq.orm_get_all_free_accounts()
 
-    previous = None
-    for step in SessionState.__all_states__:
-        if step.state == current_state:
-            await state.set_state(previous)
-            await message.answer(f"Ок, вы вернулись к прошлому шагу \n {SessionState.texts[previous.state]}")
-            return
-        previous = step
-        
-        
+    # if not accounts:
+    #     await message.answer(
+    #         "Спочатку авторизуйте аккаунти", reply_markup=session_managment
+    #     )
+    #     await state.clear()
+    #     return
+
+    # if len(accounts) < len(unique_users):
+    #     await message.answer(
+    #         "Недостатньо вільних аккаунтів! Спочатку авторизуйте аккаунти",
+    #         reply_markup=session_managment,
+    #     )
+    #     await state.clear()
+    #     return
+
+    # await roles_distribution()
+
+
+@router.message(SessionState.answer_time)
+async def add_session_fifth_wrong(message: types.Message):
+    await message.answer("Ви ввели недопустимі дані, введіть провіжок часу знову")
+
 
 # session list
 @router.message(SESSION_MANAGMENT_KB_NAMES["session_list"] == F.text)
@@ -733,7 +769,7 @@ async def session_settings(callback: CallbackQuery, state: FSMContext):
     if session:
         await callback.answer()
 
-        text = f"Активна сесія: {'✅' if session.is_active else '❌'}\nID: <code>{session.id}</code>\nСесія: {session.session_type}\nКількість аккаунтів: {session.account_count}\n\nПромпт:\n{session.prompt}\n"
+        text = f"Активна сесія: {'✅' if session.is_active else '❌'}\nID: <code>{session.id}</code>\nСесія: {session.session_type}\nЧат: {session.chat_url}\n\nЧас відповіді: {session.answer_time}\n\n"
         btns = {}
 
         if session.is_active:
@@ -782,4 +818,3 @@ async def remove_session(message: Message, state: FSMContext):
         )
 
     await state.clear()
-

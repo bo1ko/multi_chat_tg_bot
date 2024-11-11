@@ -43,11 +43,10 @@ class Session(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     session_type: Mapped[str] = mapped_column(String(255))
-    prompt: Mapped[str] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=False)
-    account_count: Mapped[int] = mapped_column(Integer, default=0)
     data: Mapped[dict] = mapped_column(JSON, nullable=True)
     chat_url: Mapped[str] = mapped_column(Text, nullable=True)
+    answer_time: Mapped[str] = mapped_column(Text, nullable=True)
 
 
 class Account(Base):

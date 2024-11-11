@@ -42,6 +42,10 @@ async def generate_dialogs(prompt_text, message: Message, back_session_managment
         )
         generated_text = completion.choices[0].message.content
         generated_json = extract_json_from_text(generated_text)
+        
+        if not generated_json:
+            return False
+        
         btns = {"Так": "use_dialog", "Ні": "dont_use_dialog"}
 
         file_path = "response.txt"
@@ -71,22 +75,25 @@ async def generate_dialogs(prompt_text, message: Message, back_session_managment
 
 def extract_json_from_text(text):
     pattern = r"\{.*?\}|\[.*?\]"
-
     json_matches = re.findall(pattern, text, re.DOTALL)
-
     json_objects = []
 
     for match in json_matches:
         try:
-            # Attempt to parse the match as JSON
             json_obj = json.loads(match)
-            json_objects.append(json_obj)
+            # Перевіряємо, чи це список і чи кожен елемент має потрібні ключі
+            if isinstance(json_obj, list) and all(
+                isinstance(item, dict)
+                and {"message_id", "user_id", "message"}.issubset(item.keys())
+                for item in json_obj
+            ):
+                json_objects.append(json_obj)
+            else:
+                return False
         except json.JSONDecodeError:
-            # Ignore any matches that aren't valid JSON
             continue
 
     return json_objects
 
 
-async def roles_distribution(accounts, json_data):
-    ...
+async def roles_distribution(accounts, json_data): ...
