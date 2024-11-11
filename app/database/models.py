@@ -47,6 +47,7 @@ class Session(Base):
     data: Mapped[dict] = mapped_column(JSON, nullable=True)
     chat_url: Mapped[str] = mapped_column(Text, nullable=True)
     answer_time: Mapped[str] = mapped_column(Text, nullable=True)
+    is_dialog_created: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class Account(Base):

@@ -2,7 +2,7 @@ from sqlalchemy import select, delete, update
 from typing import Union
 
 from app.database.engine import engine, session_maker
-from app.database.models import Base
+from app.database.models import Base, Dialog
 from app.database.models import User, Session, Account
 
 
@@ -183,13 +183,15 @@ async def orm_get_all_accounts_without_session():
                 return None
 
 # ---------- GET ALL FREE ACCOUNTS ----------
-async def orm_get_all_free_accounts():
+async def orm_get_free_accounts():    
     async with session_maker() as session:
         async with session.begin():
             try:
-                query = select(Account).where(Account.is_session_created == True & Account.is_active == False)
+                print('!' * 10)
+                query = select(Account).where((Account.is_session_created == True) & (Account.is_active == False))
                 result = await session.execute(query)
                 accounts = result.scalars().all()
+                print('!' * 10, accounts)
                 return accounts
             except Exception as e:
                 print(e)
@@ -307,74 +309,6 @@ async def orm_change_account_session_status(number: str, status: bool):
                 print(e)
                 return False
 
-
-# ---------- PROXY ADD ----------
-async def orm_add_proxy(proxy: str):
-    async with session_maker() as session:
-        async with session.begin():
-            try:
-                obj = Proxy(proxy_url=proxy)
-                session.add(obj)
-                await session.commit()
-                return obj
-            except Exception as e:
-                print(e)
-                return None
-
-
-# ---------- GET ALL PROXIES ----------
-async def orm_get_all_proxies():
-    async with session_maker() as session:
-        async with session.begin():
-            try:
-                query = select(Proxy)
-                result = await session.execute(query)
-                proxies = result.scalars().all()
-                return proxies
-            except Exception as e:
-                print(e)
-                return None
-
-
-# ---------- GET PROXY ----------
-async def orm_get_proxy(proxy: str):
-    async with session_maker() as session:
-        async with session.begin():
-            try:
-                query = select(Proxy).where(Proxy.proxy_url == proxy)
-                result = await session.execute(query)
-                return result.scalar()
-            except Exception as e:
-                print(e)
-                return None
-
-# ---------- GET NOT ACTIVE PROXIES ----------
-async def orm_get_not_active_proxies():
-    async with session_maker() as session:
-        async with session.begin():
-            try:
-                query = select(Proxy).where(Proxy.is_active == False)
-                result = await session.execute(query)
-                proxies = result.scalars().all()
-                return proxies
-            except Exception as e:
-                print(e)
-                return None
-
-# ---------- REMOVE PROXY ----------
-async def orm_remove_proxy(proxy: str):
-    async with session_maker() as session:
-        async with session.begin():
-            try:
-                query = delete(Proxy).where(Proxy.proxy_url == proxy)
-                await session.execute(query)
-                await session.commit()
-                return True
-            except Exception as e:
-                print(e)
-                return False
-
-
 # ---------- ADD API ----------
 async def orm_add_api(number: str, api_id: str, api_hash: str):
     async with session_maker() as session:
@@ -465,3 +399,16 @@ async def orm_update_session(id: int, **kwargs):
             except Exception as e:
                 print(e)
                 return False
+
+# ---------- ADD DIALOG ----------
+async def orm_add_dialog(session_id: int, account_id: int, message_id: int, message: str):
+    async with session_maker() as session:
+        async with session.begin():
+            try:
+                obj = Dialog(session_id=session_id, account_id=account_id, message_id=message_id, message=message)
+                session.add(obj)
+                await session.commit()
+                return obj
+            except Exception as e:
+                print(e)
+                return None

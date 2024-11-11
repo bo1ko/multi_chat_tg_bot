@@ -23,7 +23,7 @@ from app.keyboards.inline import get_callback_btns
 from app.filters.check_admin import IsAdmin
 from app.bots.get_account_app_data import AuthTgAPI
 from app.utils.helpers import clear_folder, generate_dialogs, roles_distribution
-from app.utils.account_manager import xlsx_accounts_parser, xlsx_proxies_parser
+from app.utils.account_manager import xlsx_accounts_parser
 
 load_dotenv()
 
@@ -376,7 +376,7 @@ class Auth(StatesGroup):
     code = State()
 
 
-login_manager = TelegramLogin()
+login_manager = None
 auth_task = None
 
 
@@ -395,12 +395,17 @@ async def api_auth(message: Message):
 
 @router.callback_query(F.data == "start_auth_tg_yes")
 async def start_auth_tg_yes(callback: CallbackQuery, state: FSMContext):
-    global auth_task
+    global auth_task, login_manager
+
+    if auth_task and not auth_task.done():
+        auth_task.cancel()
+        login_manager = None
 
     await callback.answer()
     await callback.message.edit_text("Розпочинаю Telegram авторизацію...")
 
     # await login_manager.start_login(callback.message, state)
+    login_manager = TelegramLogin(account_managment)
     auth_task = asyncio.create_task(login_manager.start_login(callback.message))
     await state.set_state(Auth.code)
 
@@ -415,7 +420,7 @@ async def start_auth_tg_no(callback: CallbackQuery, state: FSMContext):
 @router.message(Auth.code)
 async def code_handler(message: types.Message, state: FSMContext):
     if message.text and message.text.isdigit():
-        global auth_task
+        global auth_task, login_manager
 
         code_text = message.text
         auth_task = await login_manager.finish_login(message, code_text)
@@ -575,11 +580,16 @@ async def back_step_handler(message: types.Message, state: FSMContext):
         previous = step
 
 
-@router.message(SessionState.session_type)
+@router.message(SessionState.session_type, F.text)
 async def add_session_second(message: Message, state: FSMContext):
     await state.update_data(session_type=message.text)
     await message.answer("Введіть промпт 👇", reply_markup=back_session_managment)
     await state.set_state(SessionState.prompt)
+
+
+@router.message(SessionState.session_type)
+async def add_session_fifth_wrong(message: types.Message):
+    await message.answer("Ви ввели недопустимі дані, введіть назву знову")
 
 
 @router.message(SessionState.prompt, F.text)
@@ -685,37 +695,27 @@ async def add_session_fifth(message: Message, state: FSMContext):
             f"Назва: {session_type}\nЮрл чату: {chat_url}\nСередній час відповіді: {message.text}",
             reply_markup=session_managment,
         )
+        await message.answer(
+            "Починаю розприділяти ролі по аккаунтам", reply_markup=session_managment
+        )
+
+        accounts = await rq.orm_get_free_accounts()
+        session = await rq.orm_get_session(add_session.id)
+        result_status, result_text = await roles_distribution(
+            session.id, accounts, session.data
+        )
+
+        if result_status:
+            await message.answer(
+                f"Результат: {result_text}", reply_markup=session_managment
+            )
+            await rq.orm_update_session(add_session.id, is_dialog_created=True)
+        else:
+            await message.answer(result_text, reply_markup=session_managment)
     else:
         await message.answer("Щось пішло не так.. Спробуйте знову!")
 
     await state.clear()
-
-    # data_str = await state.get_value("data_json")
-    # data_json = ast.literal_eval(data_str)
-
-    # unique_users = [message["user_id"] for message in data_json]
-
-    # await message.answer(
-    #     "Починаю розприділяти ролі між аккаунтами", reply_markup=back_session_managment
-    # )
-    # accounts = await rq.orm_get_all_free_accounts()
-
-    # if not accounts:
-    #     await message.answer(
-    #         "Спочатку авторизуйте аккаунти", reply_markup=session_managment
-    #     )
-    #     await state.clear()
-    #     return
-
-    # if len(accounts) < len(unique_users):
-    #     await message.answer(
-    #         "Недостатньо вільних аккаунтів! Спочатку авторизуйте аккаунти",
-    #         reply_markup=session_managment,
-    #     )
-    #     await state.clear()
-    #     return
-
-    # await roles_distribution()
 
 
 @router.message(SessionState.answer_time)
@@ -762,7 +762,7 @@ async def session_list(callback: CallbackQuery):
 
 # session settings
 @router.callback_query(F.data.startswith("session_settings_"))
-async def session_settings(callback: CallbackQuery, state: FSMContext):
+async def session_settings(callback: CallbackQuery):
     session_id = int(callback.data.split("_")[-1])
     session = await rq.orm_get_session(session_id)
 
@@ -772,10 +772,13 @@ async def session_settings(callback: CallbackQuery, state: FSMContext):
         text = f"Активна сесія: {'✅' if session.is_active else '❌'}\nID: <code>{session.id}</code>\nСесія: {session.session_type}\nЧат: {session.chat_url}\n\nЧас відповіді: {session.answer_time}\n\n"
         btns = {}
 
-        if session.is_active:
-            btns["Зупинити сесію"] = f"stop_session_{session.id}"
+        if not session.is_dialog_created:
+            btns["Створити діалог"] = f"start_dialog_{session.id}"
         else:
-            btns["Розпочати сесію"] = f"start_session_{session.id}"
+            if session.is_active:
+                btns["Зупинити сесію"] = f"stop_session_{session.id}"
+            else:
+                btns["Розпочати сесію"] = f"start_session_{session.id}"
 
         btns["Назад"] = "session_list"
 
@@ -783,6 +786,35 @@ async def session_settings(callback: CallbackQuery, state: FSMContext):
             text, reply_markup=get_callback_btns(btns=btns, sizes=(1,))
         )
 
+
+@router.callback_query(F.data.startswith("start_dialog_"))
+async def start_dialog(callback: CallbackQuery, state: FSMContext):
+    session_id = int(callback.data.split("_")[-1])
+
+    await callback.answer()
+    message_info = await callback.message.answer(
+        "Починаю розприділяти ролі по аккаунтам"
+    )
+
+    accounts = await rq.orm_get_free_accounts()
+    session = await rq.orm_get_session(session_id)
+    result_status, result_text = await roles_distribution(
+        session.id, accounts, session.data
+    )
+
+    if result_status:
+        await session_settings(callback)
+        
+        message_result = await callback.message.answer(
+            f"Результат: {result_text}"
+        )
+        await rq.orm_update_session(session_id, is_dialog_created=True)
+        
+        await asyncio.sleep(2)
+        await message_info.delete()
+        await message_result.delete()
+    else:
+        await callback.message.answer(result_text, reply_markup=session_managment)
 
 # remove session
 @router.message(SESSION_MANAGMENT_KB_NAMES["remove_session"] == F.text)
@@ -818,3 +850,22 @@ async def remove_session(message: Message, state: FSMContext):
         )
 
     await state.clear()
+
+
+@router.message(Command("test"))
+async def cmd_test(message: Message, state: FSMContext):
+    accounts = await rq.orm_get_free_accounts()
+    print(accounts)
+    session = await rq.orm_get_session(3)
+    result_status, result_text = await roles_distribution(
+        session.id, accounts, session.data
+    )
+
+    if result_status:
+        await message.answer(
+            f"Результат: {result_text}", reply_markup=session_managment
+        )
+    else:
+        await message.answer(result_text, reply_markup=session_managment)
+
+    # await message.answer("test")

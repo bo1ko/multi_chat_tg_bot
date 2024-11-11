@@ -1,10 +1,13 @@
+import ast
 import json
 import re
 import openai
 import os
+import traceback
 
 from aiogram.types import Message, FSInputFile
 
+from app.database.orm_query import orm_add_dialog, orm_get_free_accounts
 from app.keyboards.inline import get_callback_btns
 
 
@@ -42,10 +45,10 @@ async def generate_dialogs(prompt_text, message: Message, back_session_managment
         )
         generated_text = completion.choices[0].message.content
         generated_json = extract_json_from_text(generated_text)
-        
+
         if not generated_json:
             return False
-        
+
         btns = {"Так": "use_dialog", "Ні": "dont_use_dialog"}
 
         file_path = "response.txt"
@@ -96,4 +99,30 @@ def extract_json_from_text(text):
     return json_objects
 
 
-async def roles_distribution(accounts, json_data): ...
+async def roles_distribution(session_id, accounts, data):
+    try:
+        data_json = ast.literal_eval(data)
+
+        unique_users = {int(message["user_id"]) for message in data_json}
+        print(unique_users)
+        print(len(unique_users), len(accounts))
+        if len(accounts) < len(unique_users):
+            return False, "Недостатньо вільних аккаунтів"
+        elif len(accounts) > len(unique_users):
+            accounts = accounts[:len(unique_users)]
+        
+        result_count = 0
+        for message in data_json:
+            add_result = await orm_add_dialog(session_id, accounts[int(message["user_id"])].id, int(message["message_id"]), message["message"])
+        
+            if add_result:
+                result_count += 1
+        
+        if result_count == len(data_json):
+            return True, 'Виконано'
+        else:
+            return False, 'Щось пішло не так'   
+    except Exception as e:
+        print(e)
+        traceback.format_exc()
+        return False, f'Щось пішло не так\n{e}'

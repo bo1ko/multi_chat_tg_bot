@@ -7,12 +7,13 @@ import app.database.orm_query as rq
 
 
 class TelegramLogin:
-    def __init__(self):
+    def __init__(self, account_managment):
         self.phone_number = None
         self.phone_code_hash = None
         self.app = None
         self.accounts = []  # Список акаунтів для авторизації
         self.current_index = 0  # Поточний індекс акаунта в списку
+        self.account_managment = account_managment
 
     async def initialize_accounts(self):
         self.accounts = await rq.orm_get_authorized_accounts_without_session()
@@ -30,7 +31,7 @@ class TelegramLogin:
 
     async def process_next_account(self, message: Message):
         if self.current_index >= len(self.accounts):
-            await message.answer("Авторизація завершена для всіх акаунтів.")
+            await message.answer("Авторизація завершена для всіх акаунтів.", reply_markup=self.account_managment)
             return
 
         account = self.accounts[self.current_index]

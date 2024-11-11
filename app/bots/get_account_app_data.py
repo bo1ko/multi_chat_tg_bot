@@ -25,7 +25,7 @@ class AuthTgAPI:
                 return
 
             playwright = await async_playwright().start()
-            self.browser = await playwright.chromium.launch()
+            self.browser = await playwright.chromium.launch(headless=False)
             
             await self.first_step(message)
         except Exception as e:
@@ -65,7 +65,6 @@ class AuthTgAPI:
             await message.answer(
                 f"Введи код підтвердження, який отримав на {account.number}"
             )
-
     async def second_step(self, message: Message, code: str):
         try:
             await self.page.fill('//*[@id="my_password"]', code)
