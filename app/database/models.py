@@ -1,4 +1,5 @@
 from sqlalchemy import (
+    JSON,
     DateTime,
     String,
     func,
@@ -44,6 +45,9 @@ class Session(Base):
     session_type: Mapped[str] = mapped_column(String(255))
     prompt: Mapped[str] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=False)
+    account_count: Mapped[int] = mapped_column(Integer, default=0)
+    data: Mapped[dict] = mapped_column(JSON, nullable=True)
+    chat_url: Mapped[str] = mapped_column(Text, nullable=True)
 
 
 class Account(Base):
@@ -58,36 +62,20 @@ class Account(Base):
     session_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("sessions.id", ondelete="CASCADE"), nullable=True
     )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False)
+    proxy: Mapped[str] = mapped_column(Text, nullable=True)
 
 
-class Proxy(Base):
-    __tablename__ = "proxies"
+
+class Dialog(Base):
+    __tablename__ = "dialogs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    proxy_url: Mapped[str] = mapped_column(String(255), unique=True)
     session_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("sessions.id", ondelete="CASCADE"), nullable=True
     )
     account_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=True
     )
-
-"""
-Session
-id int
-session_type str
-prompt str
-is_active bool
-
-Phone
-id int
-number str
-is_app_created boolean
-api_id str
-api_hash str
-is_session_created boolean
-session_id foreign
-
-Proxy
-
-"""
+    message_id: Mapped[int] = mapped_column(Integer, nullable=True)
+    message: Mapped[str] = mapped_column(Text, nullable=True)
