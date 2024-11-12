@@ -1,7 +1,12 @@
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 from pyrogram import Client
-from pyrogram.errors import SessionPasswordNeeded, FloodWait, PhoneCodeInvalid, PhoneCodeExpired
+from pyrogram.errors import (
+    SessionPasswordNeeded,
+    FloodWait,
+    PhoneCodeInvalid,
+    PhoneCodeExpired,
+)
 
 import app.database.orm_query as rq
 
@@ -20,7 +25,7 @@ class TelegramLogin:
 
     async def start_login(self, message: Message):
         await self.initialize_accounts()
-        
+
         # Перевіряємо, чи є акаунти для обробки
         if not self.accounts:
             await message.answer("Немає акаунтів для авторизації.")
@@ -31,23 +36,50 @@ class TelegramLogin:
 
     async def process_next_account(self, message: Message):
         if self.current_index >= len(self.accounts):
-            await message.answer("Авторизація завершена для всіх акаунтів.", reply_markup=self.account_managment)
+            await message.answer(
+                "Авторизація завершена для всіх акаунтів.",
+                reply_markup=self.account_managment,
+            )
             return
 
         account = self.accounts[self.current_index]
         self.phone_number = account.number
-        
+
+        try:
+            scheme = account.proxy.split("://")[0]
+            parsed_proxy = account.proxy.split("://")[1].split(":")
+
+            proxy = {
+                "hostname": parsed_proxy[2].split("@")[1],
+                "port": int(parsed_proxy[3]),
+                "username": parsed_proxy[0],
+                "password": parsed_proxy[1].split("@")[0],
+                "scheme": scheme,
+            }
+        except Exception as e:
+            print(e)
+            await message.answer(
+                f"Проксі {account.proxy} для номера {account.number}"
+            )
+            return
 
         # Створюємо новий клієнт, якщо необхідно
         if not self.app or not self.app.is_connected:
-            self.app = Client(f"sessions/{account.number}", api_id=account.api_id, api_hash=account.api_hash)
+            self.app = Client(
+                f"sessions/{account.number}",
+                api_id=account.api_id,
+                api_hash=account.api_hash,
+                proxy=proxy
+            )
             await self.app.connect()
 
         try:
             code = await self.app.send_code(account.number)
             self.phone_code_hash = code.phone_code_hash
 
-            await message.answer(f"Введи код підтвердження, який отримав на {account.number}")
+            await message.answer(
+                f"Введи код підтвердження, який отримав на {account.number}"
+            )
         except Exception as e:
             await message.answer(f"Не вдалося надіслати код: {str(e)}")
             self.current_index += 1
@@ -63,13 +95,19 @@ class TelegramLogin:
             await message.answer("Авторизація успішна!")
             await rq.orm_change_account_session_status(self.phone_number, True)
         except SessionPasswordNeeded:
-            await message.answer("Потрібен пароль для двоетапної авторизації. Введи пароль.")
+            await message.answer(
+                "Потрібен пароль для двоетапної авторизації. Введи пароль."
+            )
         except PhoneCodeInvalid:
             await message.answer("Неправильний код підтвердження. Спробуй ще раз.")
         except PhoneCodeExpired:
-            await message.answer("Код підтвердження закінчився. Спробуй отримати новий код.")
+            await message.answer(
+                "Код підтвердження закінчився. Спробуй отримати новий код."
+            )
         except FloodWait as e:
-            await message.answer(f"Тимчасове блокування. Будь ласка, зачекай {e.value} секунд.")
+            await message.answer(
+                f"Тимчасове блокування. Будь ласка, зачекай {e.value} секунд."
+            )
         except Exception as e:
             await message.answer(f"Помилка авторизації: {str(e)}")
         finally:

@@ -96,8 +96,24 @@ class ChatJoiner:
                         continue
 
                     await orm_update_account(self.phone_number, is_active=True)
+                    
+                    try:
+                        scheme = account.proxy.split("://")[0]
+                        parsed_proxy = account.proxy.split("://")[1].split(":")
 
-                    async with Client(f"sessions/{self.phone_number}") as client:
+                        proxy = {
+                            "hostname": parsed_proxy[2].split("@")[1],
+                            "port": int(parsed_proxy[3]),
+                            "username": parsed_proxy[0],
+                            "password": parsed_proxy[1].split("@")[0],
+                            "scheme": scheme
+                        }
+                    except Exception as e:
+                        print(e)
+                        await self.message.answer(f'Проксі {account.proxy} для номера {account.number}')
+                        return
+
+                    async with Client(f"sessions/{self.phone_number}", proxy=proxy) as client:
                         chat_url = session.chat_url.split("/")[-1]
 
                         try:
