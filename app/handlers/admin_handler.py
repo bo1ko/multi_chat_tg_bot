@@ -451,21 +451,17 @@ async def api_auth(message: Message):
 async def start_auth_tg_yes(callback: CallbackQuery, state: FSMContext):
     global api_auth_task, api_login_manager
 
-    await callback.answer()
-    await callback.message.edit_text("Розпочинаю Telegram API авторизацію...")
-
     if api_auth_task and not api_auth_task.done():
         api_auth_task.cancel()
 
-    if not api_login_manager:
-        api_login_manager = None
+    await callback.answer()
+    await callback.message.edit_text("Розпочинаю Telegram API авторизацію...")
 
     api_login_manager = AuthTgAPI(account_managment)
     # await api_login_manager.start_login(callback.message)
     api_auth_task = asyncio.create_task(api_login_manager.start_login(callback.message))
 
-    await state.set_state(APIAuth.auth_status)
-
+    await state.set_state(APIAuth.code)
 
 @router.callback_query(F.data == "start_api_auth_tg_no")
 async def start_auth_tg_no(callback: CallbackQuery):
@@ -474,23 +470,15 @@ async def start_auth_tg_no(callback: CallbackQuery):
     await callback.message.answer("Повертаюсь назад...", reply_markup=account_managment)
 
 
-@router.message(APIAuth.auth_status)
-async def api_auth_handler(message: Message, state: FSMContext):
-    global api_login_manager
-
-    print("!" * 10, api_login_manager)
-    await api_login_manager.first_step(message)
-    await state.set_state(APIAuth.code)
-
 
 @router.message(APIAuth.code)
 async def code_handler(message: types.Message, state: FSMContext):
-    global api_auth_task, api_login_manager
+    global api_login_manager
 
     code_text = message.text
-    api_auth_task = await api_login_manager.second_step(message, code_text)
+    await api_login_manager.second_step(message, code_text)
 
-    await state.set_state(APIAuth.auth_status)
+    await state.clear()
 
 
 # ---------- SESSION ----------

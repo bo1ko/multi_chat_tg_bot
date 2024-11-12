@@ -30,18 +30,10 @@ load_dotenv()
 
 class ChatJoiner:
     def __init__(self, message: Message, admin_menu):
-        self.first_start = None
         self.message: Message = message
         self.admin_menu = admin_menu
         self.phone_number = None
-
-    log_file_path = "D:\\projects\\seo-group-tg-bot\\channel_log.txt"
-
-    async def log_channel_status(self, chat_url, success=True, text=""):
-        status = "Успішно додано" if success else "Неуспішно додано"
-
-        with open("channel_log.txt", "a", encoding="utf-8") as file:
-            file.write(f"{status}: {chat_url} - {text}\n")
+        self.sent_answer = False
 
     async def start_chatting(self, session_id):
         try:
@@ -115,23 +107,18 @@ class ChatJoiner:
                                     chat.id, client.me.id
                                 )
                             except UserNotParticipant:
-                                await self.log_channel_status(
-                                    chat_url,
-                                    success=True,
-                                    text="Користувач доданий в чат",
-                                )
                                 await client.join_chat(chat_url)
 
-                            if client.me.username not in usernames:
-                                usernames.append(client.me.username)
 
                             async for group in client.get_dialogs():
                                 # Check if the chat has unread messages
                                 if group.chat.username == chat_url:
-                                    if self.first_start:
+                                    if client.me.username not in usernames:
+                                        usernames.append(client.me.username)
+                                        
                                         await client.read_chat_history(group.chat.id)
-                                        self.first_start = False
                                         continue
+                                    
                                     if group.unread_messages_count > 0:
                                         print(
                                             f"Unread messages in chat with ID {group.chat.id}: {group.unread_messages_count}"
@@ -163,15 +150,17 @@ class ChatJoiner:
                                                             text=answer,
                                                             reply_to_message_id=group_message.id,
                                                         )
-                                                        await asyncio.sleep(5)
+                                                        self.sent_answer = True
 
+                            if self.sent_answer:
+                                logging.info(f"Answer got. Sleep time: {sleep_time}")
+                                await asyncio.sleep(sleep_time / 2)
+                                self.sent_answer = False
                             # CONTINUE DIALOG BETWEEN BOTS
-                            await self.log_channel_status(chat_url, success=True)
                             await client.send_message(chat_url, str(dialog.message))
 
-                            await asyncio.sleep(5)
                             logger.info(
-                                f"Sleep time: {random_number(int(first), int(last))}"
+                                f"Sleep time: {sleep_time}"
                             )
 
                         except (
@@ -180,15 +169,11 @@ class ChatJoiner:
                                 UsernameNotOccupied,
                         ) as e:
                             # If the chat does not exist or access error
-                            await self.log_channel_status(
-                                chat_url, success=False, text=str(e)
-                            )
+                            logging.error(f"Error: {e}\n\n{chat_url}")
                             continue
                         except InviteRequestSent:
                             # If a request for admission is sent, but not admission
-                            await self.log_channel_status(
-                                chat_url, success=False, text="Надіслано запит на вступ"
-                            )
+                            logging.error(f"Error: {e}\n\n{chat_url}")
                         except Exception as e:
                             logger.warning(f"Error: {e}\n\n{chat_url}")
                             await self.message.bot.send_message(
@@ -197,6 +182,9 @@ class ChatJoiner:
                             )
                 finally:
                     await orm_update_account(self.phone_number, is_active=False)
+                    logging.info(f"Sleep time: {sleep_time}")
+                    await asyncio.sleep(sleep_time)
+
 
             await self.message.answer(
                 "Ділоги закінчились. Процес зупинено.", reply_markup=self.admin_menu
