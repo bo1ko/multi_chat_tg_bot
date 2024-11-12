@@ -10,3 +10,5 @@ sessions/*
 proxy_test.xlsx
 test.json
 response.txt
+answers_log/*
+channel_log.txt

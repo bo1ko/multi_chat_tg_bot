@@ -213,7 +213,7 @@ def random_number(first, last):
     return random.randrange(first, last)
 
 def write_unique_message(number, text):
-    with open(f"{number}.txt", "a+", encoding="utf-8") as file:
+    with open(f"answers_log/{number}.txt", "a+", encoding="utf-8") as file:
         existing_messages = file.readlines()
 
         if f'{text}\n' not in existing_messages:
@@ -225,5 +225,5 @@ def write_unique_message(number, text):
             return False
 
 def clear_unique_message(number):
-    with open(f"{number}.txt", "w", encoding="utf-8") as file:
+    with open(f"answers_log/{number}.txt", "w", encoding="utf-8") as file:
         pass
