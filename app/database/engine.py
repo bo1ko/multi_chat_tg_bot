@@ -1,7 +1,8 @@
 import os
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from dotenv import load_dotenv
 
-from .models import Base
+from app.database.models import Base
 
 #from .env file:
 # DB_LITE=sqlite+aiosqlite:///my_base.db
@@ -9,7 +10,9 @@ from .models import Base
 
 # engine = create_async_engine(os.getenv('DB_LITE'), echo=True)
 
-engine = create_async_engine(os.getenv('DB_URL'), echo=True)
+load_dotenv()
+
+engine = create_async_engine(os.getenv('DB_URL'))
 
 session_maker = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 

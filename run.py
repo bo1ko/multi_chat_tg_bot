@@ -18,7 +18,7 @@ load_dotenv()
 
 # LOGGING
 logging.basicConfig(
-    level=logging.WARNING,  # Logging level
+    level=logging.INFO,  # Logging level
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[
         logging.FileHandler("bot.log", encoding="utf-8"),
@@ -57,7 +57,7 @@ async def main():
         commands=private, scope=types.BotCommandScopeAllPrivateChats()
     )
     await dp.start_polling(bot)
-
+    
 
 if __name__ == "__main__":
     try:

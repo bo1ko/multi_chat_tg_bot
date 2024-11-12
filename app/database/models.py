@@ -48,6 +48,7 @@ class Session(Base):
     chat_url: Mapped[str] = mapped_column(Text, nullable=True)
     answer_time: Mapped[str] = mapped_column(Text, nullable=True)
     is_dialog_created: Mapped[bool] = mapped_column(Boolean, default=False)
+    instructions: Mapped[str] = mapped_column(Text, nullable=True)
 
 
 class Account(Base):

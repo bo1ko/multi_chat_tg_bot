@@ -412,3 +412,15 @@ async def orm_add_dialog(session_id: int, account_id: int, message_id: int, mess
             except Exception as e:
                 print(e)
                 return None
+
+# ---------- GET DIALOG ----------
+async def orm_get_dialogs(session_id: int):
+    async with session_maker() as session:
+        async with session.begin():
+            try:
+                query = select(Dialog).where(Dialog.session_id == session_id)
+                result = await session.execute(query)
+                return result.scalars().all()
+            except Exception as e:
+                print(e)
+                return None

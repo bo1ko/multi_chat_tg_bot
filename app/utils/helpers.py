@@ -1,15 +1,24 @@
 import ast
 import json
+import random
 import re
 import openai
 import os
 import traceback
+import logging
+import traceback
 
 from aiogram.types import Message, FSInputFile
 
-from app.database.orm_query import orm_add_dialog, orm_get_free_accounts
+from app.database.orm_query import (
+    orm_add_dialog,
+    orm_get_free_accounts,
+    orm_get_session,
+)
 from app.keyboards.inline import get_callback_btns
 
+
+logger = logging.getLogger(__name__)
 
 def clear_folder(folder_path):
     if os.path.exists(folder_path):
@@ -24,7 +33,7 @@ def clear_folder(folder_path):
 
 async def generate_dialogs(prompt_text, message: Message, back_session_managment):
     prompt_text += """\n\n
-    The answer must be in format like this
+    The answer must be in format like this, id values must start from 0:
     [{"message_id":"0", "user_id": "0", "message": "some text"}, {"message_id":"1", "user_id": "1", "message": "some text"}]
     """
 
@@ -76,6 +85,71 @@ async def generate_dialogs(prompt_text, message: Message, back_session_managment
         )
 
 
+async def generate_answer_for_user(
+    session_id, question, message: Message, back_session_managment
+):
+    try:
+        session = await orm_get_session(session_id)
+
+        if not session:
+            await message.answer(
+                "Сесія не знаєдена. Не можу дати відповідь користувачеві",
+                reply_markup=back_session_managment,
+            )
+            return
+        
+        if session.instructions is None:
+            return None
+        
+        prompt_text = f"{session.instructions}\n\n"
+        prompt_text += f"Question from chat: {question}\n"
+        prompt_text += """\n\n
+        The answer must be in format like this
+        {"message": "some text"}
+        """
+
+        try:
+            client = openai.OpenAI(
+                api_key=os.environ.get("OPENAI_API_KEY"),
+            )
+            completion = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": prompt_text},
+                ],
+                max_tokens=16384,
+                temperature=0.7,
+            )
+            generated_text = completion.choices[0].message.content
+            json_match = re.search(r'\{.*?\}', generated_text)
+            json_text = json_match.group(0)
+            
+            try:
+                data = json.loads(json_text)  # Парсимо JSON
+                answer_text = data.get("message")
+                
+                if not answer_text:
+                    return False
+                else:
+                    logging.info("Відповідь користувачеві: " + answer_text)
+                    return answer_text
+                
+            except json.JSONDecodeError:
+                logging.error("Не вдалося розпарсити JSON: " + answer_text)
+                return False
+            
+
+
+        except openai.OpenAIError as e:
+            logging.error(f"Сталася помилка при отриманні відповіді: {e}")
+    except Exception as e:
+        logging.error('helpers.py - generate_answer_for_user()')
+        logging.error(f"Сталася помилка при отриманні відповіді: {e}")
+        logging.error(traceback.format_exc())
+        return False
+
+
 def extract_json_from_text(text):
     pattern = r"\{.*?\}|\[.*?\]"
     json_matches = re.findall(pattern, text, re.DOTALL)
@@ -109,20 +183,47 @@ async def roles_distribution(session_id, accounts, data):
         if len(accounts) < len(unique_users):
             return False, "Недостатньо вільних аккаунтів"
         elif len(accounts) > len(unique_users):
-            accounts = accounts[:len(unique_users)]
-        
+            accounts = accounts[: len(unique_users)]
+
         result_count = 0
         for message in data_json:
-            add_result = await orm_add_dialog(session_id, accounts[int(message["user_id"])].id, int(message["message_id"]), message["message"])
-        
+            add_result = await orm_add_dialog(
+                session_id,
+                accounts[int(message["user_id"])].id,
+                int(message["message_id"]),
+                message["message"],
+            )
+
             if add_result:
                 result_count += 1
-        
+
         if result_count == len(data_json):
-            return True, 'Виконано'
+            return True, "Виконано"
         else:
-            return False, 'Щось пішло не так'   
+            return False, "Щось пішло не так"
     except Exception as e:
         print(e)
         traceback.format_exc()
-        return False, f'Щось пішло не так\n{e}'
+        print(traceback.format_exc())
+        return False, f"Щось пішло не так\n{e}\n{traceback.format_exc()}"
+
+
+# random number generator beetwen first and last number
+def random_number(first, last):
+    return random.randrange(first, last)
+
+def write_unique_message(number, text):
+    with open(f"{number}.txt", "a+", encoding="utf-8") as file:
+        existing_messages = file.readlines()
+
+        if f'{text}\n' not in existing_messages:
+            file.write(f"{text}\n")
+            print("Message added to the file.")
+            return True
+        else:
+            print("Message already exists in the file.")
+            return False
+
+def clear_unique_message(number):
+    with open(f"{number}.txt", "w", encoding="utf-8") as file:
+        pass

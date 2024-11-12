@@ -1,19 +1,15 @@
-import ast
 import asyncio
 import os
-import openai
 
-from datetime import datetime, timedelta
-
-from io import BytesIO
 from aiogram import Router, types, F, Bot
-from aiogram.types import Message, CallbackQuery, FSInputFile
+from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command, or_f, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from dotenv import load_dotenv
 import validators
 
+from app.bots.chat_bot import ChatJoiner
 import app.database.orm_query as rq
 
 from app.bots.auth import TelegramLogin
@@ -205,7 +201,6 @@ ACCOUNT_MANAGMENT_KB_NAMES = {
     "remove_account": "Видалити аккаунти 🗑️",
     "api_auth_proccess": "Авторизація API ⚙",
     "telegram_auth_proccess": "Авторизація Telegram 🚀",
-    "set_proxy": "Встановити проксі 🌐",
     "back_account_managment": '⬅️ Назад до меню "Аккаунти"',
 }
 account_managment = get_keyboard(
@@ -214,7 +209,6 @@ account_managment = get_keyboard(
     ACCOUNT_MANAGMENT_KB_NAMES["remove_account"],
     ACCOUNT_MANAGMENT_KB_NAMES["api_auth_proccess"],
     ACCOUNT_MANAGMENT_KB_NAMES["telegram_auth_proccess"],
-    ACCOUNT_MANAGMENT_KB_NAMES["set_proxy"],
     BACK_TO_MENU["back_to_menu"],
     sizes=(1, 2, 2, 1, 1),
 )
@@ -505,6 +499,7 @@ SESSION_MANAGMENT_KB_NAMES = {
     "add_session": "Добавити сесію 💻",
     "remove_session": "Видалити сесію 🗑️",
     "session_list": "Список сесій 📕",
+    "additional instructions": "Додаткові вказівки 📝",
     "step_back": "Крок назад",
     "back_session_managment": "⬅️ Назад до панелі сесій",
 }
@@ -512,14 +507,23 @@ session_managment = get_keyboard(
     SESSION_MANAGMENT_KB_NAMES["session_list"],
     SESSION_MANAGMENT_KB_NAMES["add_session"],
     SESSION_MANAGMENT_KB_NAMES["remove_session"],
+    SESSION_MANAGMENT_KB_NAMES["additional instructions"],
     BACK_TO_MENU["back_to_menu"],
-    sizes=(1, 2, 1),
+    sizes=(1, 2, 1, 1),
 )
 back_session_managment = get_keyboard(
+    SESSION_MANAGMENT_KB_NAMES["back_session_managment"],
+    sizes=(1, 1),
+)
+
+back_from_add_session = get_keyboard(
     SESSION_MANAGMENT_KB_NAMES["step_back"],
     SESSION_MANAGMENT_KB_NAMES["back_session_managment"],
     sizes=(1, 1),
 )
+
+chat_bot = None
+chat_bot_task = None
 
 
 class SessionState(StatesGroup):
@@ -528,6 +532,8 @@ class SessionState(StatesGroup):
     account_count = State()
     chat_url = State()
     answer_time = State()
+    set_instructions = State()
+    edit_instructions = State()
 
     remove_session = State()
 
@@ -554,7 +560,7 @@ async def session_panel(message: Message, state: FSMContext):
 # add session
 @router.message(StateFilter(None), SESSION_MANAGMENT_KB_NAMES["add_session"] == F.text)
 async def add_session_first(message: Message, state: FSMContext):
-    await message.answer("Введіть назву сесії 👇", reply_markup=back_session_managment)
+    await message.answer("Введіть назву сесії 👇", reply_markup=back_from_add_session)
     await state.set_state(SessionState.session_type)
 
 
@@ -583,7 +589,7 @@ async def back_step_handler(message: types.Message, state: FSMContext):
 @router.message(SessionState.session_type, F.text)
 async def add_session_second(message: Message, state: FSMContext):
     await state.update_data(session_type=message.text)
-    await message.answer("Введіть промпт 👇", reply_markup=back_session_managment)
+    await message.answer("Введіть промпт 👇", reply_markup=back_from_add_session)
     await state.set_state(SessionState.prompt)
 
 
@@ -596,12 +602,12 @@ async def add_session_fifth_wrong(message: types.Message):
 async def add_session_third(message: Message, state: FSMContext):
     prompt = message.text
 
-    result = await generate_dialogs(prompt, message, back_session_managment)
+    result = await generate_dialogs(prompt, message, back_from_add_session)
 
     if not result:
         await message.answer(
             "Помилка при отриманні JSON з відповіді GPT. Спробуйте ще раз згенерувати діалог.\n\nВведіть промпт 👇",
-            reply_markup=back_session_managment,
+            reply_markup=back_from_add_session,
         )
         return
 
@@ -619,7 +625,7 @@ async def use_dialog(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text("Діалог підтверджено")
 
     await callback.message.answer(
-        "Введіть посилання на чат 👇", reply_markup=back_session_managment
+        "Введіть посилання на чат 👇", reply_markup=back_from_add_session
     )
 
     await state.set_state(SessionState.chat_url)
@@ -637,18 +643,18 @@ async def add_session_fourth(message: Message, state: FSMContext):
     url = message.text
 
     if validators.url(url):
-        await message.answer("Юрл підійшов", reply_markup=back_session_managment)
+        await message.answer("Юрл підійшов", reply_markup=back_from_add_session)
         await state.update_data(chat_url=message.text)
 
         await message.answer(
             "Введіть проміжок часу між відповідями користувачів (секунди)\nПриклад: 60-120, 35-60, 20-30",
-            reply_markup=back_session_managment,
+            reply_markup=back_from_add_session,
         )
         await state.set_state(SessionState.answer_time)
     else:
         await message.answer(
             "Юрл не валідний, введіть юрл чату знову",
-            reply_markup=back_session_managment,
+            reply_markup=back_from_add_session,
         )
         return
 
@@ -665,7 +671,7 @@ async def add_session_fifth(message: Message, state: FSMContext):
     if len(answer_time) != 2:
         await message.answer(
             "Введіть правильний проміжок часу між відповідями користувачів",
-            reply_markup=back_session_managment,
+            reply_markup=back_from_add_session,
         )
         return
 
@@ -673,7 +679,7 @@ async def add_session_fifth(message: Message, state: FSMContext):
     if int(answer_time[0]) >= int(answer_time[1]):
         await message.answer(
             "Введіть правильний проміжок часу між відповідями користувачів",
-            reply_markup=back_session_managment,
+            reply_markup=back_from_add_session,
         )
         return
 
@@ -769,7 +775,10 @@ async def session_settings(callback: CallbackQuery):
     if session:
         await callback.answer()
 
-        text = f"Активна сесія: {'✅' if session.is_active else '❌'}\nID: <code>{session.id}</code>\nСесія: {session.session_type}\nЧат: {session.chat_url}\n\nЧас відповіді: {session.answer_time}\n\n"
+        text = f"Активна сесія: {'✅' if session.is_active else '❌'}\nID: <code>{session.id}</code>\nСесія: {session.session_type}\nЧат: {session.chat_url}\nЧас відповіді: {session.answer_time}\n"
+        
+        if session.instructions:
+            text += f"Інструкція: {session.instructions}"
         btns = {}
 
         if not session.is_dialog_created:
@@ -804,17 +813,48 @@ async def start_dialog(callback: CallbackQuery, state: FSMContext):
 
     if result_status:
         await session_settings(callback)
-        
-        message_result = await callback.message.answer(
-            f"Результат: {result_text}"
-        )
+
+        message_result = await callback.message.answer(f"Результат: {result_text}")
         await rq.orm_update_session(session_id, is_dialog_created=True)
-        
+
         await asyncio.sleep(2)
         await message_info.delete()
         await message_result.delete()
     else:
         await callback.message.answer(result_text, reply_markup=session_managment)
+
+@router.callback_query(F.data.startswith("start_session_"))
+async def start_chatting_session(callback: CallbackQuery, state: FSMContext):
+    global chat_bot, chat_bot_task
+    
+    if chat_bot_task and not chat_bot_task.done():
+        chat_bot_task.cancel()
+    
+    session_id = int(callback.data.split("_")[-1])
+    chat_bot = ChatJoiner(callback.message, admin_menu)
+    chat_bot_task = asyncio.create_task(chat_bot.start_chatting(session_id))
+    
+    if chat_bot_task.done():
+        await callback.answer("Сесія не запустилась...", reply_markup=session_managment)
+    else:
+        await callback.answer("Сесія запущена", reply_markup=session_managment)
+        await session_settings(callback)
+
+    await state.clear()
+
+
+@router.callback_query(F.data.startswith("stop_session_"))
+async def stop_chatting_session(callback: CallbackQuery, state: FSMContext):
+    global chat_bot, chat_bot_task
+
+    if chat_bot_task and not chat_bot_task.done():
+        chat_bot_task.cancel()
+        await callback.answer("Сесію зупинено", reply_markup=session_managment)
+        await session_settings(callback)
+    else:
+        await callback.answer("Сесія не запущена", reply_markup=session_managment)
+
+    await state.clear()    
 
 # remove session
 @router.message(SESSION_MANAGMENT_KB_NAMES["remove_session"] == F.text)
@@ -852,20 +892,57 @@ async def remove_session(message: Message, state: FSMContext):
     await state.clear()
 
 
-@router.message(Command("test"))
-async def cmd_test(message: Message, state: FSMContext):
-    accounts = await rq.orm_get_free_accounts()
-    print(accounts)
-    session = await rq.orm_get_session(3)
-    result_status, result_text = await roles_distribution(
-        session.id, accounts, session.data
+@router.message(SESSION_MANAGMENT_KB_NAMES["additional instructions"] == F.text)
+async def additional_instructions(message: Message, state: FSMContext):
+    await message.answer("Виберіть сесію", reply_markup=back_session_managment)
+    sessions = await rq.orm_get_all_sessions()
+    if sessions:
+        for session in sessions:
+            btns = {}
+            text = f"👉 {session.session_type} (ID: {session.id})"
+            if session.instructions:
+                text += f"\n\n📃 {session.instructions}"
+                btns = {"Змінити": f"session_edit_{session.id}"}
+                btns["Видалити"] = f"remove_session_{session.id}"
+            else:
+                btns = {"Встановити": f"session_edit_{session.id}"}
+
+            await message.answer(
+                text, reply_markup=get_callback_btns(btns=btns, sizes=(1,))
+            )
+
+
+@router.callback_query(F.data.startswith("session_edit_"))
+async def set_instructions(callback: CallbackQuery, state: FSMContext):
+    session_id = int(callback.data.split("_")[-1])
+    await state.clear()
+    await callback.answer()
+    await callback.message.answer("Введіть інструкцію")
+    await state.set_state(SessionState.edit_instructions)
+    await state.update_data(session_id=session_id)
+
+
+@router.message(SessionState.edit_instructions)
+async def set_instructions(message: Message, state: FSMContext):
+    data = await state.get_data()
+    session_id = data.get("session_id")
+    await rq.orm_update_session(session_id, instructions=message.text)
+    await message.answer("Інструкцію успішно змінено", reply_markup=session_managment)
+    await state.clear()
+
+
+@router.callback_query(F.data.startswith("remove_session_"))
+async def remove_session(callback: CallbackQuery, state: FSMContext):
+    session_id = int(callback.data.split("_")[-1])
+    await callback.message.edit_text("Видалюємо інструкцію...")
+    await rq.orm_update_session(session_id, instructions=None)
+    await callback.message.answer(
+        "Інструкцію успішно видалено", reply_markup=session_managment
     )
+    await state.clear()
 
-    if result_status:
-        await message.answer(
-            f"Результат: {result_text}", reply_markup=session_managment
-        )
-    else:
-        await message.answer(result_text, reply_markup=session_managment)
 
-    # await message.answer("test")
+@router.message(Command("test"))
+async def cmd_test(message: Message):
+    chat_bot = ChatJoiner(message, admin_menu)
+    await chat_bot.start_chatting(4)
