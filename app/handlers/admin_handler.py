@@ -240,11 +240,14 @@ async def account_panel(message: Message, state: FSMContext):
 
     if api_auth_task and not api_auth_task.done():
         api_auth_task.cancel()
-        api_login_manager = None
+        
         try:
             await api_auth_task
         except asyncio.CancelledError:
             await message.answer("API авторизація була скасована.")
+    
+    if api_login_manager:
+        api_login_manager = None
 
     await message.answer('Розділ "Аккаунти 🔑"', reply_markup=account_managment)
     await state.clear()
@@ -378,38 +381,35 @@ auth_task = None
 # telegram auth
 @router.message(ACCOUNT_MANAGMENT_KB_NAMES["telegram_auth_proccess"] == F.text)
 async def api_auth(message: Message):
-    btns = {"Так": "start_auth_tg_yes", "Ні": "start_auth_tg_no"}
-    await message.answer(
-        f'Розділ "{ACCOUNT_MANAGMENT_KB_NAMES["telegram_auth_proccess"]}"',
-        reply_markup=back_account_managment,
-    )
-    await message.answer(
-        "Запутити процес авторизації?", reply_markup=get_callback_btns(btns=btns)
-    )
+    await message.answer('Виберіть номер для авторизації', reply_markup=back_account_managment)
 
+    accounts = await rq.orm_get_authorized_accounts_without_session()
+    btns = {}
+    
+    for account in accounts:
+        btns[f'{account.number}'] = f'start_auth_tg_{account.id}'
+        
+    await message.answer(f'Номера 📱', reply_markup=get_callback_btns(btns=btns, sizes=(1,)))
+    
 
-@router.callback_query(F.data == "start_auth_tg_yes")
-async def start_auth_tg_yes(callback: CallbackQuery, state: FSMContext):
+@router.callback_query(F.data.startswith("start_auth_tg_"))
+async def start_auth_tg(callback: CallbackQuery, state: FSMContext):
     global auth_task, login_manager
+    
+    account_id = int(callback.data.split("_")[-1])
 
     if auth_task and not auth_task.done():
         auth_task.cancel()
         login_manager = None
 
-    await callback.answer()
     await callback.message.edit_text("Розпочинаю Telegram авторизацію...")
+
+    account = await rq.orm_get_account_by_id(account_id)
 
     # await login_manager.start_login(callback.message, state)
     login_manager = TelegramLogin(account_managment)
-    auth_task = asyncio.create_task(login_manager.start_login(callback.message))
+    auth_task = asyncio.create_task(login_manager.start_login(callback.message, account))
     await state.set_state(Auth.code)
-
-
-@router.callback_query(F.data == "start_auth_tg_no")
-async def start_auth_tg_no(callback: CallbackQuery, state: FSMContext):
-    await callback.answer()
-    await callback.message.edit_text("Дію скасовано")
-    await callback.message.answer("Повертаюсь назад...", reply_markup=account_managment)
 
 
 @router.message(Auth.code)

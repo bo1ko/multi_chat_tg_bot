@@ -22,7 +22,7 @@ from app.database.orm_query import (
     orm_update_account,
     orm_update_session,
 )
-from app.utils.helpers import generate_answer_for_user, random_number, write_unique_message, clear_unique_message
+from app.utils.helpers import generate_answer_for_user, is_proxy_working, random_number, write_unique_message, clear_unique_message
 
 logger = logging.getLogger(__name__)
 load_dotenv()
@@ -95,23 +95,31 @@ class ChatJoiner:
                     if not self.phone_number:
                         continue
 
-                    await orm_update_account(self.phone_number, is_active=True)
                     
                     try:
                         scheme = account.proxy.split("://")[0]
                         parsed_proxy = account.proxy.split("://")[1].split(":")
 
                         proxy = {
-                            "hostname": parsed_proxy[2].split("@")[1],
-                            "port": int(parsed_proxy[3]),
+                            "hostname": parsed_proxy[1].split("@")[1],
+                            "port": int(parsed_proxy[2]),
                             "username": parsed_proxy[0],
                             "password": parsed_proxy[1].split("@")[0],
                             "scheme": scheme
                         }
                     except Exception as e:
                         print(e)
-                        await self.message.answer(f'Проксі {account.proxy} для номера {account.number}')
+                        await self.message.answer(f'Невалідний проксі {account.proxy} для номера {account.number}', reply_markup=self.admin_menu)
                         return
+                    
+                    result = await is_proxy_working(account.proxy)
+                    if not result:
+                        await self.message.answer(
+                            f"Помилка при підключенні до Telegram (Проксі не дає відповідь)", reply_markup=self.account_managment
+                        )
+                        return
+                    
+                    await orm_update_account(self.phone_number, is_active=True)
 
                     async with Client(f"sessions/{self.phone_number}", proxy=proxy) as client:
                         chat_url = session.chat_url.split("/")[-1]

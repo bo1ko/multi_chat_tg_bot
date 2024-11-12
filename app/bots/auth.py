@@ -1,4 +1,3 @@
-from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 from pyrogram import Client
 from pyrogram.errors import (
@@ -7,8 +6,8 @@ from pyrogram.errors import (
     PhoneCodeInvalid,
     PhoneCodeExpired,
 )
-
 import app.database.orm_query as rq
+from app.utils.helpers import is_proxy_working
 
 
 class TelegramLogin:
@@ -16,101 +15,81 @@ class TelegramLogin:
         self.phone_number = None
         self.phone_code_hash = None
         self.app = None
-        self.accounts = []  # Список акаунтів для авторизації
-        self.current_index = 0  # Поточний індекс акаунта в списку
         self.account_managment = account_managment
 
-    async def initialize_accounts(self):
-        self.accounts = await rq.orm_get_authorized_accounts_without_session()
-
-    async def start_login(self, message: Message):
-        await self.initialize_accounts()
-
-        # Перевіряємо, чи є акаунти для обробки
-        if not self.accounts:
-            await message.answer("Немає акаунтів для авторизації.")
-            return
-
-        # Починаємо авторизацію з першого акаунта
-        await self.process_next_account(message)
-
-    async def process_next_account(self, message: Message):
-        if self.current_index >= len(self.accounts):
-            await message.answer(
-                "Авторизація завершена для всіх акаунтів.",
-                reply_markup=self.account_managment,
-            )
-            return
-
-        account = self.accounts[self.current_index]
+    async def start_login(self, message: Message, account):
         self.phone_number = account.number
 
         try:
+            # Parse the proxy from account data
             scheme = account.proxy.split("://")[0]
             parsed_proxy = account.proxy.split("://")[1].split(":")
-
             proxy = {
-                "hostname": parsed_proxy[2].split("@")[1],
-                "port": int(parsed_proxy[3]),
+                "hostname": parsed_proxy[1].split("@")[1],
+                "port": int(parsed_proxy[2]),
                 "username": parsed_proxy[0],
                 "password": parsed_proxy[1].split("@")[0],
                 "scheme": scheme,
             }
         except Exception as e:
-            print(e)
             await message.answer(
-                f"Проксі {account.proxy} для номера {account.number}"
+                f"Невалідний проксі {account.proxy} для номера {account.number}",
+                reply_markup=self.account_managment,
             )
             return
 
-        # Створюємо новий клієнт, якщо необхідно
+        # Check if the proxy is working
+        result = await is_proxy_working(account.proxy)
+        if not result:
+            await message.answer(
+                f"Помилка при підключенні до Telegram (Проксі не дає відповідь)", reply_markup=self.account_managment
+            )
+            return
+
+        # Initialize the client if not already connected
         if not self.app or not self.app.is_connected:
             self.app = Client(
                 f"sessions/{account.number}",
                 api_id=account.api_id,
                 api_hash=account.api_hash,
-                proxy=proxy
+                proxy=proxy,
             )
             await self.app.connect()
 
+        # Send verification code
         try:
             code = await self.app.send_code(account.number)
             self.phone_code_hash = code.phone_code_hash
-
             await message.answer(
-                f"Введи код підтвердження, який отримав на {account.number}"
+                f"Введи код підтвердження, який отримав на {account.number}", reply_markup=self.account_managment
             )
         except Exception as e:
-            await message.answer(f"Не вдалося надіслати код: {str(e)}")
-            self.current_index += 1
-            await self.process_next_account(message)  # Переходимо до наступного акаунта
+            await message.answer(f"Не вдалося надіслати код: {str(e)}", reply_markup=self.account_managment)
+            await self.app.disconnect()
 
     async def finish_login(self, message, code_text):
         if not self.phone_number or not self.phone_code_hash:
             await message.answer("Немає збережених даних для авторизації.")
             return
 
+        # Attempt to sign in with the provided code
         try:
             await self.app.sign_in(self.phone_number, self.phone_code_hash, code_text)
-            await message.answer("Авторизація успішна!")
+            await message.answer("Авторизація успішна!", reply_markup=self.account_managment)
             await rq.orm_change_account_session_status(self.phone_number, True)
         except SessionPasswordNeeded:
-            await message.answer(
-                "Потрібен пароль для двоетапної авторизації. Введи пароль."
-            )
+            await message.answer("Потрібен пароль для двоетапної авторизації", reply_markup=self.account_managment)
         except PhoneCodeInvalid:
-            await message.answer("Неправильний код підтвердження. Спробуй ще раз.")
+            await message.answer("Неправильний код підтвердження. Спробуй ще раз.", reply_markup=self.account_managment)
         except PhoneCodeExpired:
             await message.answer(
-                "Код підтвердження закінчився. Спробуй отримати новий код."
+                "Код підтвердження закінчився. Спробуй отримати новий код.", reply_markup=self.account_managment
             )
         except FloodWait as e:
             await message.answer(
-                f"Тимчасове блокування. Будь ласка, зачекай {e.value} секунд."
+                f"Тимчасове блокування. Будь ласка, зачекай {e.value} секунд.", reply_markup=self.account_managment
             )
         except Exception as e:
-            await message.answer(f"Помилка авторизації: {str(e)}")
+            await message.answer(f"Помилка авторизації: {str(e)}", reply_markup=self.account_managment)
         finally:
             await self.app.disconnect()
-            self.current_index += 1  # Переходимо до наступного акаунта
-            await self.process_next_account(message)  # Запускаємо наступний акаунт

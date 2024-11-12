@@ -7,6 +7,7 @@ import os
 import traceback
 import logging
 import traceback
+import httpx
 
 from aiogram.types import Message, FSInputFile
 
@@ -227,3 +228,30 @@ def write_unique_message(number, text):
 def clear_unique_message(number):
     with open(f"answers_log/{number}.txt", "w", encoding="utf-8") as file:
         pass
+
+async def is_proxy_working(proxy_url):
+    proxies = {
+        "http://": proxy_url,
+        "https://": proxy_url
+    }
+    
+    try:
+        # Use httpx with a timeout to prevent long waits if the proxy isn't responding
+        async with httpx.AsyncClient(proxies=proxies, timeout=5) as client:
+            # Send a request to a service that returns your IP address
+            response = await client.get("https://api.ipify.org")
+            
+            if response.status_code == 200:
+                print("Proxy is working. IP:", response.text)
+                return True
+            else:
+                print(f"Proxy returned status code: {response.status_code}")
+    except httpx.HTTPStatusError as e:
+        print(f"HTTP error occurred: {e}")
+    except httpx.RequestError as e:
+        print(f"Request error occurred: {e}")
+    except Exception as e:
+        print(f"Other error occurred: {e}")
+    
+    print("Proxy is not working.")
+    return False

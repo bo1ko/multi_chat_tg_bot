@@ -16,9 +16,12 @@ async def xlsx_accounts_parser(file_path: str):
         sheet = wb.active
         count = 0
 
-        for row in sheet.iter_rows(min_row=2, min_col=1, max_col=2):
-            phone_number = str(int(float(row[0].value)))
-            proxy = str(row[1].value)
+        for row in sheet.iter_rows(min_row=1, min_col=1, max_col=2):
+            try:
+                phone_number = str(int(row[0].value)) if row[0].value is not None else None
+                proxy = str(row[1].value)
+            except:
+                continue
 
             if not phone_number or not proxy or proxy == "None":
                 continue
@@ -44,4 +47,4 @@ async def xlsx_accounts_parser(file_path: str):
         return count
     except Exception as e:
         logging.error(f"Помилка при обробці файлу {file_path}: {str(e)}")
-        return False
+        return count
