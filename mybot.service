@@ -1,0 +1,12 @@
+[Unit]
+Description=My TG Bot
+After=multi-uesr.target
+
+[Service]
+Type=simple
+ExecStart=/home/user/multi_chat_tg_bot/.venv/bin/python /home/user/multi_chat_tg_bot/run.py
+WorkingDirectory=/home/user/multi_chat_tg_bot
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
