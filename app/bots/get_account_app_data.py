@@ -25,7 +25,7 @@ class AuthTgAPI:
             return
 
         playwright = await async_playwright().start()
-        self.browser = await playwright.chromium.launch(headless=False)
+        self.browser = await playwright.chromium.launch()
         
         # Починаємо авторизацію з першого акаунта
         await self.process_next_account(message)
