@@ -1,138 +1,100 @@
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from app.database.orm_query import orm_get_all_accounts_without_session, orm_add_api
-
+import asyncio
+from playwright.async_api import async_playwright
+from app.database.orm_query import orm_add_api
 
 class AuthTgAPI:
     def __init__(self, account_managment):
+        self.account_managment = account_managment
         self.browser = None
         self.page = None
-        self.accounts = []
-        self.phone_number = None
-        self.current_index = 0  # Поточний індекс акаунта в списку
-        self.account_managment = account_managment
+        self.playwright = None
 
-    async def initialize_accounts(self):
-        # Завантажуємо акаунти з бази даних
-        self.accounts = await orm_get_all_accounts_without_session()
+    async def initialize_browser(self):
+        # Ініціалізуємо playwright і браузер
+        self.playwright = await async_playwright().start()
+        self.browser = await self.playwright.chromium.launch(headless=False)
+        self.page = await self.browser.new_page(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36")
 
-    async def start_login(self, message):
-        await self.initialize_accounts()
+    async def close_browser(self):
+        # Закриваємо браузер і playwright
+        if self.page:
+            await self.page.close()
+        if self.browser:
+            await self.browser.close()
+        if self.playwright:
+            await self.playwright.stop()
 
-        # Перевіряємо, чи є акаунти для обробки
-        if not self.accounts:
-            await message.answer("Немає акаунтів для авторизації.")
-            return
-
-        # Запуск браузера
-
-        # Починаємо авторизацію з першого акаунта
-        await self.process_next_account(message)
-
-    async def process_next_account(self, message):
-        self.browser = webdriver.Chrome()
-        self.browser.get("https://my.telegram.org/auth")
-        
-        if self.current_index >= len(self.accounts):
-            await message.answer("Авторизація завершена для всіх акаунтів.", reply_markup=self.account_managment)
-            self.browser.quit()
-            return
-
-        account = self.accounts[self.current_index]
-        self.phone_number = account.number
-
-        # Заповнюємо номер телефону
-        phone_input = WebDriverWait(self.browser, 10).until(
-            EC.presence_of_element_located((By.XPATH, '//*[@id="my_login_phone"]'))
-        )
-        phone_input.clear()
-        phone_input.send_keys(account.number)
-
-        send_button = self.browser.find_element(By.XPATH, '//*[@id="my_send_form"]/div[2]/button')
-        send_button.click()
-
-        await self.first_step(account, message)
-
-    async def first_step(self, account, message):
+    async def start_login(self, message, account):
         try:
-            # Чекаємо на появу сповіщення про перевищення кількості спроб
-            WebDriverWait(self.browser, 5).until(
-                EC.presence_of_element_located((By.XPATH, '//*[@id="my_login_alert"]/div'))
-            )
-            await message.answer(f"{account.number} - too many tries")
-            self.browser.quit()
-            self.current_index += 1  # Переходимо до наступного акаунта
-            await self.process_next_account(message)
-        except:
-            await message.answer(f"Введи код підтвердження, який отримав на {account.number}")
+            # Перевіряємо чи браузер ініціалізовано
+            if not self.browser or not self.page:
+                await self.initialize_browser()
+            
+            # Переходимо на сторінку авторизації
+            await self.page.goto("https://my.telegram.org/auth")
+            self.phone_number = account.number
+
+            # Заповнюємо номер телефону
+            await self.page.fill('//*[@id="my_login_phone"]', account.number)
+            await self.page.click('//*[@id="my_send_form"]/div[2]/button')
+            await asyncio.sleep(2)
+        
+            if await self.page.is_visible('//*[@id="my_login_alert"]/div'):
+                await message.answer(f"{account.number} - too many tries")
+                await self.close_browser()
+            else:
+                await message.answer(f"Введи код підтвердження, який отримав на {account.number}")
+        except Exception as e:
+            await message.answer(f"Помилка на етапі 1: {str(e)}")
+            await self.close_browser()
 
     async def second_step(self, message, code):
         try:
-            # Заповнення поля з кодом
-            password_input = WebDriverWait(self.browser, 10).until(
-                EC.presence_of_element_located((By.XPATH, '//*[@id="my_password"]'))
-            )
-            password_input.clear()
-            password_input.send_keys(code)
+            # Вводимо код підтвердження
+            await self.page.fill('//*[@id="my_password"]', code)
+            await self.page.click('//*[@id="my_login_form"]/div[4]/button')
 
-            login_button = self.browser.find_element(By.XPATH, '//*[@id="my_login_form"]/div[4]/button')
-            login_button.click()
-            try:
-                WebDriverWait(self.browser, 5).until(
-                    EC.presence_of_element_located((By.XPATH, '//*[@id="my_login_alert"]/div'))
-                )
+            await asyncio.sleep(2)
+            
+            if await self.page.is_visible('//*[@id="my_login_alert"]/div'):
                 await message.answer("Ввели неправильний код підтвердження, спробуйте пізніше знову")
-                self.browser.quit()
-                self.current_index += 1  # Переходимо до наступного акаунта
-                await self.process_next_account(message)
-            except:
-                # Чекаємо на сторінку після успішного входу
-                WebDriverWait(self.browser, 10).until(
-                    EC.presence_of_element_located((By.XPATH, "/html/body/div[2]/div[2]/div/div/div/div/div[2]/div/ul/li[1]/a"))
-                )
-                self.browser.find_element(By.XPATH, "/html/body/div[2]/div[2]/div/div/div/div/div[2]/div/ul/li[1]/a").click()
+                await self.close_browser()
+            else:
+                # Перевіряємо успішний вхід та переходимо до отримання API даних
+                await self.page.wait_for_selector("/html/body/div[2]/div[2]/div/div/div/div/div[2]/div/ul/li[1]/a")
+                await self.page.click("/html/body/div[2]/div[2]/div/div/div/div/div[2]/div/ul/li[1]/a")
 
+                await asyncio.sleep(2)
+                
                 try:
-                    api_id, api_hash = self.get_api_data()
-                    await self.add_api_data_to_account(self.phone_number, api_id, api_hash, message)
+                    api_id, api_hash = await self.get_api_data()
+                    await self.add_api_data_to_account(
+                        self.phone_number, api_id, api_hash, message
+                    )
                 except:
-                    await self.create_new_app(message)
-
-                self.browser.quit()
-                self.current_index += 1
-                await self.process_next_account(message)
+                    await self.create_new_app(self.page, self.phone_number, message)
         except Exception as e:
-            print("Error during login:", e)
             await message.answer(f"Помилка авторизації 2: {str(e)}")
-            self.browser.quit()
-            self.current_index += 1
-            await self.process_next_account(message)
+            await self.close_browser()
 
-    def get_api_data(self):
-        WebDriverWait(self.browser, 10).until(
-            EC.presence_of_element_located((By.XPATH, '//*[@id="app_edit_form"]/h2'))
-        )
-        title = self.browser.find_element(By.XPATH, '//*[@id="app_edit_form"]/h2').text
+    async def get_api_data(self):
+        # Отримуємо дані API ID та API HASH
+        await self.page.wait_for_selector('//*[@id="app_edit_form"]/h2')
+        title = await self.page.inner_text('//*[@id="app_edit_form"]/h2')
         if title == "App configuration":
-            api_id_text = self.browser.find_element(By.XPATH, '//*[@id="app_edit_form"]/div[1]/div[1]/span').text
-            api_hash_text = self.browser.find_element(By.XPATH, '//*[@id="app_edit_form"]/div[2]/div[1]/span').text
+            api_id_text = await self.page.inner_text('//*[@id="app_edit_form"]/div[1]/div[1]/span')
+            api_hash_text = await self.page.inner_text('//*[@id="app_edit_form"]/div[2]/div[1]/span')
             return api_id_text, api_hash_text
 
     async def create_new_app(self, message):
-        app_title = self.browser.find_element(By.XPATH, '//*[@id="app_title"]')
-        app_shortname = self.browser.find_element(By.XPATH, '//*[@id="app_shortname"]')
-        app_save_button = self.browser.find_element(By.XPATH, '//*[@id="app_save_btn"]')
+        # Створюємо новий додаток, якщо немає існуючого API
+        await self.page.fill('//*[@id="app_title"]', "myapptitle")
+        await self.page.fill('//*[@id="app_shortname"]', "myapptitle")
+        await self.page.click('//*[@id="app_save_btn"]')
 
-        app_title.clear()
-        app_title.send_keys("myapptitle")
-        app_shortname.clear()
-        app_shortname.send_keys("myapptitle")
-        app_save_button.click()
-
-        api_id, api_hash = self.get_api_data()
+        await asyncio.sleep(2)
+        
+        api_id, api_hash = await self.get_api_data()
         await self.add_api_data_to_account(self.phone_number, api_id, api_hash, message)
 
     async def add_api_data_to_account(self, number, api_id, api_hash, message):

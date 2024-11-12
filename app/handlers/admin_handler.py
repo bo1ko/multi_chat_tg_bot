@@ -438,58 +438,45 @@ api_auth_task = None
 # api auth panel
 @router.message(ACCOUNT_MANAGMENT_KB_NAMES["api_auth_proccess"] == F.text)
 async def api_auth(message: Message):
-    btns = {"Так": "start_api_auth_tg_yes", "Ні": "start_api_auth_tg_no"}
-    await message.answer(
-        f'Розділ "{ACCOUNT_MANAGMENT_KB_NAMES["api_auth_proccess"]}"',
-        reply_markup=back_account_managment,
-    )
-    await message.answer(
-        "Запутити процес авторизації API?", reply_markup=get_callback_btns(btns=btns)
-    )
+    await message.answer('Виберіть номер для авторизації', reply_markup=back_account_managment)
+    accounts = await rq.orm_get_authorized_accounts()
+    
+    if accounts:
+        btns = {}
+        for account in accounts:
+            btns[f'{account.number}'] = f'start_api_auth_tg_{account.id}'
+        
+        await message.answer(f'Номера 📱', reply_markup=get_callback_btns(btns=btns, sizes=(1,)))
+    else:
+        await message.answer('Немає номерів', reply_markup=account_managment)
 
-
-@router.callback_query(F.data == "start_api_auth_tg_yes")
-async def start_auth_tg_yes(callback: CallbackQuery, state: FSMContext):
+@router.callback_query(F.data.startswith('start_api_auth_tg_'))
+async def api_auth_second(callback: types.CallbackQuery, state: FSMContext):
     global api_auth_task, api_login_manager
-
+    account_id = int(callback.data.split("_")[-1])
+    
+    
     if api_auth_task and not api_auth_task.done():
         api_auth_task.cancel()
 
-    await callback.answer()
     await callback.message.edit_text("Розпочинаю Telegram API авторизацію...")
+    
+    account = await rq.orm_get_account_by_id(account_id)
 
     api_login_manager = AuthTgAPI(account_managment)
-
-    await auth_handler(callback.message, state)
-
-
-@router.message(APIAuth.auth_status)
-async def auth_handler(message: types.Message, state: FSMContext):
-    global api_auth_task, api_login_manager
-
-    # api_auth_task = await api_login_manager.process_next_account(message)
-    api_auth_task = asyncio.create_task(api_login_manager.start_login(message))
-
+    api_auth_task = await api_login_manager.start_login(callback.message, account)
+    
     await state.set_state(APIAuth.code)
-
-
-@router.callback_query(F.data == "start_api_auth_tg_no")
-async def start_auth_tg_no(callback: CallbackQuery):
-    await callback.answer()
-    await callback.message.edit_text("Дію скасовано")
-    await callback.message.answer("Повертаюсь назад...", reply_markup=account_managment)
-
 
 @router.message(APIAuth.code)
 async def code_handler(message: types.Message, state: FSMContext):
     global api_login_manager
 
     code_text = message.text
+    
     await api_login_manager.second_step(message, code_text)
-
     await state.clear()
-    await auth_handler(message, state)
-
+    await api_auth(message)
 
 # ---------- SESSION ----------
 # session panel

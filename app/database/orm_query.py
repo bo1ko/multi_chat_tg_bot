@@ -197,6 +197,19 @@ async def orm_get_free_accounts():
                 print(e)
                 return None
 
+# ---------- GET ALL UNAUTHORIZED ACCOUNTS ----------
+async def orm_get_authorized_accounts():
+    async with session_maker() as session:
+        async with session.begin():
+            try:
+                query = select(Account).where(Account.is_app_created == False)
+                result = await session.execute(query)
+                accounts = result.scalars().all()
+                return accounts
+            except Exception as e:
+                print(e)
+                return None
+
 # ---------- UPDATE SPECIFIC ACCOUNT ----------
 async def orm_update_specific_account(id: int, **kwargs):
     async with session_maker() as session:
