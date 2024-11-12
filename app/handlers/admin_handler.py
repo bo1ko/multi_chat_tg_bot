@@ -229,7 +229,7 @@ class AccountState(StatesGroup):
     )
 )
 async def account_panel(message: Message, state: FSMContext):
-    global auth_task, api_auth_task
+    global auth_task, api_auth_task, api_login_manager
 
     if auth_task and not auth_task.done():
         auth_task.cancel()
@@ -240,6 +240,7 @@ async def account_panel(message: Message, state: FSMContext):
 
     if api_auth_task and not api_auth_task.done():
         api_auth_task.cancel()
+        api_login_manager = None
         try:
             await api_auth_task
         except asyncio.CancelledError:
@@ -458,17 +459,25 @@ async def start_auth_tg_yes(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text("Розпочинаю Telegram API авторизацію...")
 
     api_login_manager = AuthTgAPI(account_managment)
-    # await api_login_manager.start_login(callback.message)
-    api_auth_task = asyncio.create_task(api_login_manager.start_login(callback.message))
+
+    await auth_handler(callback.message, state)
+
+
+@router.message(APIAuth.auth_status)
+async def auth_handler(message: types.Message, state: FSMContext):
+    global api_auth_task, api_login_manager
+
+    # api_auth_task = await api_login_manager.process_next_account(message)
+    api_auth_task = asyncio.create_task(api_login_manager.start_login(message))
 
     await state.set_state(APIAuth.code)
+
 
 @router.callback_query(F.data == "start_api_auth_tg_no")
 async def start_auth_tg_no(callback: CallbackQuery):
     await callback.answer()
     await callback.message.edit_text("Дію скасовано")
     await callback.message.answer("Повертаюсь назад...", reply_markup=account_managment)
-
 
 
 @router.message(APIAuth.code)
@@ -479,6 +488,7 @@ async def code_handler(message: types.Message, state: FSMContext):
     await api_login_manager.second_step(message, code_text)
 
     await state.clear()
+    await auth_handler(message, state)
 
 
 # ---------- SESSION ----------
@@ -764,7 +774,7 @@ async def session_settings(callback: CallbackQuery):
         await callback.answer()
 
         text = f"Активна сесія: {'✅' if session.is_active else '❌'}\nID: <code>{session.id}</code>\nСесія: {session.session_type}\nЧат: {session.chat_url}\nЧас відповіді: {session.answer_time}\n"
-        
+
         if session.instructions:
             text += f"Інструкція: {session.instructions}"
         btns = {}
@@ -811,17 +821,18 @@ async def start_dialog(callback: CallbackQuery, state: FSMContext):
     else:
         await callback.message.answer(result_text, reply_markup=session_managment)
 
+
 @router.callback_query(F.data.startswith("start_session_"))
 async def start_chatting_session(callback: CallbackQuery, state: FSMContext):
     global chat_bot, chat_bot_task
-    
+
     if chat_bot_task and not chat_bot_task.done():
         chat_bot_task.cancel()
-    
+
     session_id = int(callback.data.split("_")[-1])
     chat_bot = ChatJoiner(callback.message, admin_menu)
     chat_bot_task = asyncio.create_task(chat_bot.start_chatting(session_id))
-    
+
     if chat_bot_task.done():
         await callback.answer("Сесія не запустилась...", reply_markup=session_managment)
     else:
@@ -842,7 +853,8 @@ async def stop_chatting_session(callback: CallbackQuery, state: FSMContext):
     else:
         await callback.answer("Сесія не запущена", reply_markup=session_managment)
 
-    await state.clear()    
+    await state.clear()
+
 
 # remove session
 @router.message(SESSION_MANAGMENT_KB_NAMES["remove_session"] == F.text)
