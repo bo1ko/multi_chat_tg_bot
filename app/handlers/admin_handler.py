@@ -257,13 +257,15 @@ async def account_panel(message: Message, state: FSMContext):
 
 # account list
 @router.message(ACCOUNT_MANAGMENT_KB_NAMES["account_list"] == F.text)
-async def account_list(message: Message):
+async def account_list(message: Message, state: FSMContext):
     accounts = await rq.orm_get_all_accounts()
+    account_messages = []
 
-    await message.answer("Список аккаунтів 👇", reply_markup=account_managment)
+    msg = await message.answer("Список аккаунтів 👇", reply_markup=account_managment)
+    account_messages.append(msg.message_id)
 
     if not accounts:
-        await message.answer("Список аккаунтів порожній")
+        await message.answer("Список аккаунтів порожній", reply_markup=account_managment)
         return
 
     for account in accounts:
@@ -279,33 +281,47 @@ async def account_list(message: Message):
                 text += f"ID сесіі: {account.session_id}\n"
 
         btns = {'Редагувати': f"edit_account_{account.id}"}
-        await message.answer(text, reply_markup=get_callback_btns(btns=btns, sizes=(1,)))
-
+        msg = await message.answer(text, reply_markup=get_callback_btns(btns=btns, sizes=(1,)))
+        account_messages.append(msg.message_id)
+        
+    await state.update_data(account_messages=account_messages)
 
 @router.callback_query(F.data.startswith("edit_account_"))
 async def edit_account(callback: CallbackQuery, state: FSMContext):
     account_id = int(callback.data.split("_")[-1])
     account = await rq.orm_get_account_by_id(int(account_id))
 
+    # Retrieve the list of message IDs to delete
+    data = await state.get_data()
+    account_messages = data.get("account_messages", [])
+
+    # Delete all the account list messages
+    for msg_id in account_messages:
+        try:
+            await callback.message.chat.delete_message(msg_id)
+        except Exception as e:
+            # Handle any exceptions, for example if the message is already deleted
+            print(f"Failed to delete message {msg_id}: {e}")
+    
     if account:
         btns = {
             'Змінити код': f"change_two_auth_code_{account.id}",
             'Змінити проксі': f"change_proxy_{account.id}",
             'Назад': f"back_to_account_list",
         }
-        await callback.message.edit_text(f"Аккаунт:\nНомер: <code>{account.number}</code>\nКод: <code>{account.two_auth_code}</code>\nПроксі: <code>{account.proxy}</code>", reply_markup=get_callback_btns(btns=btns, sizes=(1,)))
+        await callback.message.answer(f"Аккаунт:\nНомер: <code>{account.number}</code>\nКод: <code>{account.two_auth_code}</code>\nПроксі: <code>{account.proxy}</code>", reply_markup=get_callback_btns(btns=btns, sizes=(1,)))
 
 @router.callback_query(F.data.startswith("change_two_auth_code_"))
 async def change_two_auth_code(callback: CallbackQuery, state: FSMContext):
     account_id = int(callback.data.split("_")[-1])
     
-    await callback.answer()
-    await callback.message.edit_text('Введіть 2-х код:')
+    await callback.message.delete()
+    await callback.message.answer('Введіть 2-х код:', reply_markup=back_account_managment)
     await state.set_data({"account_id": account_id})
     await state.set_state(AccountState.two_code)
 
 @router.message(AccountState.two_code)
-async def change_two_auth_code(message: Message, state: FSMContext):
+async def change_two_auth_code_second(message: Message, state: FSMContext):
     two_code = message.text
     account_id = await state.get_value("account_id")
 
@@ -317,19 +333,19 @@ async def change_two_auth_code(message: Message, state: FSMContext):
         await message.answer("2-х код не змінено")
     
     await state.clear()
-    await account_list(message)
+    await account_list(message, state)
 
 @router.callback_query(F.data.startswith("change_proxy_"))
 async def change_proxy(callback: CallbackQuery, state: FSMContext):
     account_id = int(callback.data.split("_")[-1])
     
-    await callback.answer()
-    await callback.message.edit_text('Введіть проксі:')
+    await callback.message.delete()
+    await callback.message.answer('Введіть проксі:', reply_markup=back_account_managment)
     await state.set_data({"account_id": account_id})
     await state.set_state(AccountState.proxy)
 
 @router.message(AccountState.proxy)
-async def change_proxy(message: Message, state: FSMContext):
+async def change_proxy_second(message: Message, state: FSMContext):
     proxy = message.text
     account_id = await state.get_value("account_id")
 
@@ -341,17 +357,21 @@ async def change_proxy(message: Message, state: FSMContext):
         await message.answer("Проксі не змінено")
     
     await state.clear()
-    await account_list(message)
+    await account_list(message, state)
 
 @router.callback_query(F.data == "back_to_account_list")
-async def back_to_account_list(callback: CallbackQuery):
+async def back_to_account_list(callback: CallbackQuery, state: FSMContext):
     accounts = await rq.orm_get_all_accounts()
+    account_messages = []
 
+    await callback.answer()
+    
     if not accounts:
-        await callback.message.edit_text("Список аккаунтів порожній")
+        await callback.message.answer("Список аккаунтів порожній", reply_markup=account_managment)
         return
 
-    await callback.message.edit_text("Список аккаунтів 👇")
+    msg = await callback.message.answer("Список аккаунтів 👇", reply_markup=account_managment)
+    account_messages.append(msg.message_id)
 
     for account in accounts:
         text = f"Номер: <code>{account.number}</code>\n"
@@ -366,7 +386,10 @@ async def back_to_account_list(callback: CallbackQuery):
                 text += f"ID сесії: {account.session_id}\n"
 
         btns = {'Редагувати': f"edit_account_{account.id}"}
-        await callback.message.answer(text, reply_markup=get_callback_btns(btns=btns, sizes=(1,)))
+        msg = await callback.message.answer(text, reply_markup=get_callback_btns(btns=btns, sizes=(1,)))
+        account_messages.append(msg.message_id)
+    
+    await state.update_data(account_messages=account_messages)
 
 # add accounts
 @router.message(ACCOUNT_MANAGMENT_KB_NAMES["add_accounts"] == F.text)
