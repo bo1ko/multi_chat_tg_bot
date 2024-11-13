@@ -142,11 +142,11 @@ async def orm_get_all_admins():
 
 
 # ---------- ADD ACCOUNT ----------
-async def orm_add_account(number: str, proxy: str):
+async def orm_add_account(number: str, proxy: str, code: str = None):
     async with session_maker() as session:
         async with session.begin():
             try:
-                obj = Account(number=number, proxy=proxy)
+                obj = Account(number=number, proxy=proxy, two_auth_code=code)
                 session.add(obj)
                 await session.commit()
                 return obj
@@ -242,6 +242,19 @@ async def orm_update_account(number: str, **kwargs):
         async with session.begin():
             try:
                 query = update(Account).where(Account.number == number).values(**kwargs)
+                await session.execute(query)
+                await session.commit()
+                return True
+            except Exception as e:
+                print(e)
+                return False
+
+# ---------- UPDATE ACCOUNT BY ID ----------
+async def orm_update_account_by_id(id: int, **kwargs):
+    async with session_maker() as session:
+        async with session.begin():
+            try:
+                query = update(Account).where(Account.id == id).values(**kwargs)
                 await session.execute(query)
                 await session.commit()
                 return True

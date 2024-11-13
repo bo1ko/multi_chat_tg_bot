@@ -220,6 +220,8 @@ back_account_managment = get_keyboard(
 class AccountState(StatesGroup):
     add_accounts = State()
     remove_accounts = State()
+    two_code = State()
+    proxy = State()
 
 
 @router.message(
@@ -266,6 +268,7 @@ async def account_list(message: Message):
 
     for account in accounts:
         text = f"Номер: <code>{account.number}</code>\n"
+        text += f"2-х код: <code>{account.two_auth_code}</code>\n"
         text += f"Проксі: <code>{account.proxy}</code>\n"
         text += f"Додаток створений: {'✅' if account.is_app_created else '❌'}\n"
         if account.is_app_created:
@@ -275,8 +278,95 @@ async def account_list(message: Message):
             if account.is_session_created:
                 text += f"ID сесіі: {account.session_id}\n"
 
-        await message.answer(text)
+        btns = {'Редагувати': f"edit_account_{account.id}"}
+        await message.answer(text, reply_markup=get_callback_btns(btns=btns, sizes=(1,)))
 
+
+@router.callback_query(F.data.startswith("edit_account_"))
+async def edit_account(callback: CallbackQuery, state: FSMContext):
+    account_id = int(callback.data.split("_")[-1])
+    account = await rq.orm_get_account_by_id(int(account_id))
+
+    if account:
+        btns = {
+            'Змінити код': f"change_two_auth_code_{account.id}",
+            'Змінити проксі': f"change_proxy_{account.id}",
+            'Назад': f"back_to_account_list",
+        }
+        await callback.message.edit_text(f"Аккаунт:\nНомер: <code>{account.number}</code>\nКод: <code>{account.two_auth_code}</code>\nПроксі: <code>{account.proxy}</code>", reply_markup=get_callback_btns(btns=btns, sizes=(1,)))
+
+@router.callback_query(F.data.startswith("change_two_auth_code_"))
+async def change_two_auth_code(callback: CallbackQuery, state: FSMContext):
+    account_id = int(callback.data.split("_")[-1])
+    
+    await callback.answer()
+    await callback.message.edit_text('Введіть 2-х код:')
+    await state.set_data({"account_id": account_id})
+    await state.set_state(AccountState.two_code)
+
+@router.message(AccountState.two_code)
+async def change_two_auth_code(message: Message, state: FSMContext):
+    two_code = message.text
+    account_id = await state.get_value("account_id")
+
+    result = await rq.orm_update_account_by_id(account_id, two_auth_code=two_code)  
+    
+    if result:
+        await message.answer("2-х код успішно змінено")
+    else:
+        await message.answer("2-х код не змінено")
+    
+    await state.clear()
+    await account_list(message)
+
+@router.callback_query(F.data.startswith("change_proxy_"))
+async def change_proxy(callback: CallbackQuery, state: FSMContext):
+    account_id = int(callback.data.split("_")[-1])
+    
+    await callback.answer()
+    await callback.message.edit_text('Введіть проксі:')
+    await state.set_data({"account_id": account_id})
+    await state.set_state(AccountState.proxy)
+
+@router.message(AccountState.proxy)
+async def change_proxy(message: Message, state: FSMContext):
+    proxy = message.text
+    account_id = await state.get_value("account_id")
+
+    result = await rq.orm_update_account_by_id(account_id, proxy=proxy)  
+    
+    if result:
+        await message.answer("Проксі успішно змінено")
+    else:
+        await message.answer("Проксі не змінено")
+    
+    await state.clear()
+    await account_list(message)
+
+@router.callback_query(F.data == "back_to_account_list")
+async def back_to_account_list(callback: CallbackQuery):
+    accounts = await rq.orm_get_all_accounts()
+
+    if not accounts:
+        await callback.message.edit_text("Список аккаунтів порожній")
+        return
+
+    await callback.message.edit_text("Список аккаунтів 👇")
+
+    for account in accounts:
+        text = f"Номер: <code>{account.number}</code>\n"
+        text += f"2-х код: <code>{account.two_auth_code}</code>\n"
+        text += f"Проксі: <code>{account.proxy}</code>\n"
+        text += f"Додаток створений: {'✅' if account.is_app_created else '❌'}\n"
+        if account.is_app_created:
+            text += f"API ID: <code>{account.api_id}</code>\n"
+            text += f"API HASH: <code>{account.api_hash}</code>\n"
+            text += f"Сесія створена: {'✅' if account.is_session_created else '❌'}\n"
+            if account.is_session_created:
+                text += f"ID сесії: {account.session_id}\n"
+
+        btns = {'Редагувати': f"edit_account_{account.id}"}
+        await callback.message.answer(text, reply_markup=get_callback_btns(btns=btns, sizes=(1,)))
 
 # add accounts
 @router.message(ACCOUNT_MANAGMENT_KB_NAMES["add_accounts"] == F.text)
@@ -334,17 +424,15 @@ async def add_account_second(message: Message, state: FSMContext, bot: Bot):
 # remove accounts
 @router.message(ACCOUNT_MANAGMENT_KB_NAMES["remove_account"] == F.text)
 async def remove_account(message: Message, state: FSMContext):
-    await message.answer("Введіть номер:", reply_markup=back_account_managment)
+    await message.answer("Введіть номера:", reply_markup=back_account_managment)
     await state.set_state(AccountState.remove_accounts)
 
 
 @router.message(AccountState.remove_accounts)
 async def remove_account_second(message: Message, state: FSMContext):
-    await state.update_data(number=message.text)
-    data = await state.get_data()
-    number = data.get("number")
+    numbers = message.text
 
-    if number is None:
+    if numbers is None:
         await message.reply(
             "Будь ласка, надішліть правильний номер.",
             reply_markup=account_managment,
@@ -352,19 +440,14 @@ async def remove_account_second(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    check = await rq.orm_get_account(number)
-
-    if check:
-        await rq.orm_remove_account(number)
-        await message.reply(
-            f"Аккаунт <code>{number}</code> успішно видалений",
-            reply_markup=account_managment,
-        )
-    else:
-        await message.reply(
-            f"Аккаунт <code>{number}</code> не знайдено.",
-            reply_markup=account_managment,
-        )
+    accounts = await rq.orm_get_all_accounts()
+    for account in accounts:
+        if account.number in numbers:
+            await rq.orm_remove_account(account.number)
+            await message.reply(
+                f"Аккаунт <code>{account.number}</code> успішно видалений",
+                reply_markup=account_managment,
+            )
 
     await state.clear()
 
@@ -372,6 +455,7 @@ async def remove_account_second(message: Message, state: FSMContext):
 # ---------- TG AUTH ----------
 class Auth(StatesGroup):
     code = State()
+    two_auth = State()
 
 
 login_manager = None
@@ -380,7 +464,8 @@ auth_task = None
 
 # telegram auth
 @router.message(ACCOUNT_MANAGMENT_KB_NAMES["telegram_auth_proccess"] == F.text)
-async def api_auth(message: Message):
+async def api_auth(message: Message, state: FSMContext):
+    await state.clear()
     await message.answer('Виберіть номер для авторизації', reply_markup=back_account_managment)
 
     accounts = await rq.orm_get_authorized_accounts_without_session()

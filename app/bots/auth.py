@@ -5,6 +5,7 @@ from pyrogram.errors import (
     FloodWait,
     PhoneCodeInvalid,
     PhoneCodeExpired,
+    PasswordHashInvalid
 )
 import app.database.orm_query as rq
 from app.utils.helpers import is_proxy_working
@@ -19,6 +20,7 @@ class TelegramLogin:
 
     async def start_login(self, message: Message, account):
         self.phone_number = account.number
+        self.two_code = account.two_auth_code
 
         try:
             # Parse the proxy from account data
@@ -78,7 +80,14 @@ class TelegramLogin:
             await message.answer("Авторизація успішна!", reply_markup=self.account_managment)
             await rq.orm_change_account_session_status(self.phone_number, True)
         except SessionPasswordNeeded:
-            await message.answer("Потрібен пароль для двоетапної авторизації", reply_markup=self.account_managment)
+            try:
+                await self.app.check_password(self.two_code)
+                await message.answer("Авторизація 2FA успішна!", reply_markup=self.account_managment)
+                await rq.orm_change_account_session_status(self.phone_number, True)
+            except PasswordHashInvalid:
+                await message.answer("Неправильний пароль 2FA. Спробуйте ще раз.", reply_markup=self.account_managment)
+            except Exception as e:
+                await message.answer(f"Помилка при перевірці пароля 2FA: {str(e)}", reply_markup=self.account_managment)
         except PhoneCodeInvalid:
             await message.answer("Неправильний код підтвердження. Спробуй ще раз.", reply_markup=self.account_managment)
         except PhoneCodeExpired:

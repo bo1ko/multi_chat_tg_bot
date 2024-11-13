@@ -65,6 +65,7 @@ class Account(Base):
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=False)
     proxy: Mapped[str] = mapped_column(Text, nullable=True)
+    two_auth_code: Mapped[str] = mapped_column(Text, nullable=True)
 
 
 

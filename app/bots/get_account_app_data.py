@@ -13,7 +13,7 @@ class AuthTgAPI:
     async def initialize_browser(self):
         # Ініціалізуємо playwright і браузер
         self.playwright = await async_playwright().start()
-        self.browser = await self.playwright.chromium.launch(headless=False)
+        self.browser = await self.playwright.chromium.launch()
         self.page = await self.browser.new_page(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
         )
@@ -81,7 +81,7 @@ class AuthTgAPI:
                     create_title = await self.page.wait_for_selector(
                         "#app_create_form > h2", timeout=5000
                     )
-                
+
                     if create_title:
                         create_title_text = await create_title.text_content()
 
@@ -136,5 +136,5 @@ class AuthTgAPI:
             await message.answer(
                 f"API не додано до бази даних\nAPI ID: {api_id}\nAPI HASH: {api_hash}"
             )
-        
+
         await self.close_browser()
