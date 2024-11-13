@@ -653,6 +653,7 @@ async def session_panel(message: Message, state: FSMContext):
 # add session
 @router.message(StateFilter(None), SESSION_MANAGMENT_KB_NAMES["add_session"] == F.text)
 async def add_session_first(message: Message, state: FSMContext):
+    await state.clear()
     await message.answer("Введіть назву сесії 👇", reply_markup=back_from_add_session)
     await state.set_state(SessionState.session_type)
 
@@ -680,8 +681,9 @@ async def back_step_handler(message: types.Message, state: FSMContext):
 
 
 @router.message(SessionState.session_type, F.text)
-async def add_session_second(message: Message, state: FSMContext):
-    await state.update_data(session_type=message.text)
+async def add_session_second(message: Message, state: FSMContext, back=False):
+    if not back:
+        await state.update_data(session_type=message.text)
     await message.answer("Введіть промпт 👇", reply_markup=back_from_add_session)
     await state.set_state(SessionState.prompt)
 
@@ -728,7 +730,7 @@ async def use_dialog(callback: CallbackQuery, state: FSMContext):
 async def dont_use_dialog(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await callback.message.edit_text("Діалог скасовано")
-    await add_session_second(callback.message, state)
+    await add_session_second(callback.message, state, back=True)
 
 
 @router.message(SessionState.chat_url, F.text)

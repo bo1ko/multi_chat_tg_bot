@@ -10,6 +10,8 @@ import traceback
 import httpx
 
 from aiogram.types import Message, FSInputFile
+from aiogram.fsm.context import FSMContext
+
 
 from app.database.orm_query import (
     orm_add_dialog,
@@ -72,7 +74,6 @@ async def generate_dialogs(prompt_text, message: Message, back_session_managment
             reply_markup=back_session_managment,
         )
         await message.answer_document(file)
-
         await message.answer(
             "Використати даний діалог?", reply_markup=get_callback_btns(btns=btns)
         )
