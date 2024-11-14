@@ -107,7 +107,7 @@ class ChatJoiner:
                             "scheme": scheme,
                         }
                     except Exception as e:
-                        await message.answer(
+                        await self.message.answer(
                             f"Невалідний проксі {account.proxy} для номера {account.number}",
                             reply_markup=self.account_managment,
                         )
