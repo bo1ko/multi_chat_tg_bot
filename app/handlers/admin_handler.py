@@ -199,7 +199,6 @@ ACCOUNT_MANAGMENT_KB_NAMES = {
     "account_list": "Список аккаунтів 📃",
     "add_accounts": "Добавити аккаунти 📲",
     "remove_account": "Видалити аккаунти 🗑️",
-    "api_auth_proccess": "Авторизація API ⚙",
     "telegram_auth_proccess": "Авторизація Telegram 🚀",
     "back_account_managment": '⬅️ Назад до меню "Аккаунти"',
 }
@@ -207,10 +206,9 @@ account_managment = get_keyboard(
     ACCOUNT_MANAGMENT_KB_NAMES["account_list"],
     ACCOUNT_MANAGMENT_KB_NAMES["add_accounts"],
     ACCOUNT_MANAGMENT_KB_NAMES["remove_account"],
-    ACCOUNT_MANAGMENT_KB_NAMES["api_auth_proccess"],
     ACCOUNT_MANAGMENT_KB_NAMES["telegram_auth_proccess"],
     BACK_TO_MENU["back_to_menu"],
-    sizes=(1, 2, 2, 1, 1),
+    sizes=(1, 2, 1),
 )
 back_account_managment = get_keyboard(
     ACCOUNT_MANAGMENT_KB_NAMES["back_account_managment"]
@@ -231,7 +229,7 @@ class AccountState(StatesGroup):
     )
 )
 async def account_panel(message: Message, state: FSMContext):
-    global auth_task, api_auth_task, api_login_manager
+    global auth_task
 
     if auth_task and not auth_task.done():
         auth_task.cancel()
@@ -239,17 +237,6 @@ async def account_panel(message: Message, state: FSMContext):
             await auth_task
         except asyncio.CancelledError:
             await message.answer("Телеграм авторизація була скасована.")
-
-    if api_auth_task and not api_auth_task.done():
-        api_auth_task.cancel()
-        
-        try:
-            await api_auth_task
-        except asyncio.CancelledError:
-            await message.answer("API авторизація була скасована.")
-    
-    if api_login_manager:
-        api_login_manager = None
 
     await message.answer('Розділ "Аккаунти 🔑"', reply_markup=account_managment)
     await state.clear()
@@ -532,60 +519,6 @@ async def code_handler(message: types.Message, state: FSMContext):
     else:
         await message.answer("Будь ласка, введи коректний код підтвердження.")
 
-
-# ---------- API AUTH ----------
-class APIAuth(StatesGroup):
-    auth_status = State()
-    code = State()
-
-
-api_login_manager = None
-api_auth_task = None
-
-
-# api auth panel
-@router.message(ACCOUNT_MANAGMENT_KB_NAMES["api_auth_proccess"] == F.text)
-async def api_auth(message: Message):
-    await message.answer('Виберіть номер для авторизації', reply_markup=back_account_managment)
-    accounts = await rq.orm_get_authorized_accounts()
-    
-    if accounts:
-        btns = {}
-        for account in accounts:
-            btns[f'{account.number}'] = f'start_api_auth_tg_{account.id}'
-        
-        await message.answer(f'Номера 📱', reply_markup=get_callback_btns(btns=btns, sizes=(1,)))
-    else:
-        await message.answer('Немає номерів', reply_markup=account_managment)
-
-@router.callback_query(F.data.startswith('start_api_auth_tg_'))
-async def api_auth_second(callback: types.CallbackQuery, state: FSMContext):
-    global api_auth_task, api_login_manager
-    account_id = int(callback.data.split("_")[-1])
-    
-    
-    if api_auth_task and not api_auth_task.done():
-        api_auth_task.cancel()
-
-    await callback.message.edit_text("Розпочинаю Telegram API авторизацію...")
-    
-    account = await rq.orm_get_account_by_id(account_id)
-
-    api_login_manager = AuthTgAPI(account_managment)
-    api_auth_task = await api_login_manager.start_login(callback.message, account)
-    
-    await state.set_state(APIAuth.code)
-
-@router.message(APIAuth.code)
-async def code_handler(message: types.Message, state: FSMContext):
-    global api_login_manager
-
-    code_text = message.text
-    print('!' * 10, code_text)
-    
-    await api_login_manager.second_step(message, code_text)
-    await state.clear()
-    await api_auth(message)
 
 # ---------- SESSION ----------
 # session panel
