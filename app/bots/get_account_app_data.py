@@ -1,4 +1,5 @@
 import asyncio
+import random
 from playwright.async_api import async_playwright
 from app.database.orm_query import orm_add_api
 
@@ -13,7 +14,7 @@ class AuthTgAPI:
     async def initialize_browser(self):
         # Ініціалізуємо playwright і браузер
         self.playwright = await async_playwright().start()
-        self.browser = await self.playwright.chromium.launch()
+        self.browser = await self.playwright.chromium.launch(headless=False)
         self.page = await self.browser.new_page(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
         )
@@ -54,6 +55,7 @@ class AuthTgAPI:
             await self.close_browser()
 
     async def second_step(self, message, code):
+        print("!" * 10, "Запущеноa")
         try:
             # Вводимо код підтвердження
             await self.page.fill('//*[@id="my_password"]', code)
@@ -116,13 +118,54 @@ class AuthTgAPI:
             return api_id_text, api_hash_text
 
     async def create_new_app(self, message):
-        # Створюємо новий додаток, якщо немає існуючого API
-        await self.page.fill('//*[@id="app_title"]', "myapptitle")
-        await self.page.fill('//*[@id="app_shortname"]', "myapptitle")
-        await self.page.click('//*[@id="app_save_btn"]')
+        # Retry counter
+        retries = 5
+        attempt = 0
 
-        await asyncio.sleep(2)
+        # Initial app title and shortname
+        app_title = "myapptitle"
+        app_shortname = "myapptitle"
 
+        while attempt < retries:
+            attempt += 1
+
+            # Fill in app title and shortname
+            await asyncio.sleep(1)
+            await self.page.fill('//*[@id="app_title"]', app_title)
+            await asyncio.sleep(1)
+            await self.page.fill('//*[@id="app_shortname"]', app_shortname)
+            await asyncio.sleep(1)
+            await self.page.click(
+                '//*[@id="app_create_form"]/div[4]/div/div[1]/label/input'
+            )
+            await asyncio.sleep(1)
+            await self.page.click('//*[@id="app_save_btn"]')
+
+            await asyncio.sleep(2)  # Give time for the URL to potentially change
+
+            # If the URL hasn't changed, refresh and update the app title
+            try:
+                await self.page.wait_for_selector(
+                    '//*[@id="app_edit_form"]/h2', timeout=1000
+                )
+                break
+            except:
+                print(
+                    f"Attempt {attempt}: URL hasn't changed, refreshing and retrying with a new title."
+                )
+
+                # Refresh the page
+                await self.page.reload()
+
+                # Generate a new app title with random digits
+                app_title = f"myapptitle{random.randint(1000, 9999)}"
+                app_shortname = f"myapptitle"
+
+                # Wait a moment after refresh before retrying
+                await asyncio.sleep(2)
+                # If URL has changed, break out of the loop
+
+        # After retries or success, proceed with API data
         api_id, api_hash = await self.get_api_data()
         await self.add_api_data_to_account(self.phone_number, api_id, api_hash, message)
 

@@ -581,6 +581,7 @@ async def code_handler(message: types.Message, state: FSMContext):
     global api_login_manager
 
     code_text = message.text
+    print('!' * 10, code_text)
     
     await api_login_manager.second_step(message, code_text)
     await state.clear()
