@@ -82,7 +82,7 @@ class TelegramLogin:
         except SessionPasswordNeeded:
             try:
                 await self.app.check_password(self.two_code)
-                await message.answer("Авторизація 2FA успішна!", reply_markup=self.account_managment)
+                await message.answer("Авторизація успішна!", reply_markup=self.account_managment)
                 await rq.orm_change_account_session_status(self.phone_number, True)
             except PasswordHashInvalid:
                 await message.answer("Неправильний пароль 2FA. Спробуйте ще раз.", reply_markup=self.account_managment)

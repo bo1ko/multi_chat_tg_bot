@@ -142,11 +142,11 @@ async def orm_get_all_admins():
 
 
 # ---------- ADD ACCOUNT ----------
-async def orm_add_account(number: str, proxy: str, code: str = None):
+async def orm_add_account(number: str, proxy: str, code: str = None, api_id: str = None, api_hash: str = None, is_app_created: bool = False):
     async with session_maker() as session:
         async with session.begin():
             try:
-                obj = Account(number=number, proxy=proxy, two_auth_code=code)
+                obj = Account(number=number, proxy=proxy, two_auth_code=code, api_id = api_id, api_hash = api_hash, is_app_created=is_app_created)
                 session.add(obj)
                 await session.commit()
                 return obj

@@ -23,7 +23,8 @@ async def xlsx_accounts_parser(file_path: str):
                 two_code = str(row[2].value) if row[2].value is not None else None
                 api_id = str(row[3].value) if row[3].value is not None else None
                 api_hash = str(row[4].value) if row[4].value is not None else None
-            except:
+            except Exception as e:
+                print(e)
                 continue
 
             if (not phone_number or phone_number == "None") or (not proxy or proxy == "None"):
@@ -33,11 +34,14 @@ async def xlsx_accounts_parser(file_path: str):
 
             try:
                 account = await orm_get_account(phone_number)
-
+                print(account)
                 if account:
                     continue
-
-                result = await orm_add_account(phone_number, proxy, two_code, api_id, api_hash)
+                
+                if api_id and api_hash:
+                    result = await orm_add_account(phone_number, proxy, two_code, api_id, api_hash, is_app_created=True)
+                else:
+                    result = await orm_add_account(phone_number, proxy, two_code)
 
                 if result:
                     count += 1

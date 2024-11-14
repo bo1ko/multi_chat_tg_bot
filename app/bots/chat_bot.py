@@ -96,48 +96,21 @@ class ChatJoiner:
                         continue
 
                     try:
-                        # Check and parse proxy if available
-                        if account.proxy:
-                            try:
-                                scheme = account.proxy.split("://")[0]
-                                parsed_proxy = account.proxy.split("://")[1]
-
-                                if "[" in parsed_proxy:  # IPv6 format
-                                    host = parsed_proxy.split("]")[0][1:]
-                                    port, username, password = parsed_proxy.split("]")[1].split(":")
-                                else:  # IPv4 format
-                                    host, port, username, password = parsed_proxy.split(":")
-                                
-                                proxy = {
-                                    "hostname": host,
-                                    "port": int(port),
-                                    "username": username,
-                                    "password": password,
-                                    "scheme": scheme
-                                }
-                                
-                                for attempt in range(3):
-                                    result = await is_proxy_working(account.proxy)
-                                    if result:
-                                        break
-                                else:
-                                    await self.message.answer(
-                                        "Помилка при підключенні до Telegram (Проксі не дає відповідь)"
-                                    )
-                                    return
-                            except Exception as e:
-                                print(e)
-                                await self.message.answer(
-                                    f'Невалідний проксі {account.proxy} для номера {account.number}',
-                                    reply_markup=self.admin_menu
-                                )
-                                return
-                        else:
-                            proxy = None
-
+                        # Parse the proxy from account data
+                        scheme = account.proxy.split("://")[0]
+                        parsed_proxy = account.proxy.split("://")[1].split(":")
+                        proxy = {
+                            "hostname": parsed_proxy[1].split("@")[1],
+                            "port": int(parsed_proxy[2]),
+                            "username": parsed_proxy[0],
+                            "password": parsed_proxy[1].split("@")[0],
+                            "scheme": scheme,
+                        }
                     except Exception as e:
-                        print(e)
-                        await self.message.answer(f'Невалідний проксі {account.proxy} для номера {account.number}', reply_markup=self.admin_menu)
+                        await message.answer(
+                            f"Невалідний проксі {account.proxy} для номера {account.number}",
+                            reply_markup=self.account_managment,
+                        )
                         return
 
                     
