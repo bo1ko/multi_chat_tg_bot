@@ -214,8 +214,8 @@ async def roles_distribution(session_id, accounts, data):
 def random_number(first, last):
     return random.randrange(first, last)
 
-def write_unique_message(number, text):
-    with open(f"answers_log/{number}.txt", "a+", encoding="utf-8") as file:
+def write_unique_message(session_id, text):
+    with open(f"answers_log/{session_id}.txt", "a+", encoding="utf-8") as file:
         existing_messages = file.readlines()
 
         if f'{text}\n' not in existing_messages:
@@ -231,28 +231,31 @@ def clear_unique_message(number):
         pass
 
 async def is_proxy_working(proxy_url):
+    full_proxy_url = f"http://{proxy_url['username']}:{proxy_url['password']}@{proxy_url['hostname']}:{proxy_url['port']}"
+    
     proxies = {
-        "http://": proxy_url,
-        "https://": proxy_url
+        "http://": full_proxy_url,
+        "https://": full_proxy_url
     }
     
     try:
+        logging.warning(f"Використовується проксі: {full_proxy_url}")
         # Use httpx with a timeout to prevent long waits if the proxy isn't responding
         async with httpx.AsyncClient(proxies=proxies, timeout=5) as client:
             # Send a request to a service that returns your IP address
             response = await client.get("https://api.ipify.org")
             
             if response.status_code == 200:
-                print("Proxy is working. IP:", response.text)
+                logging.warning("Proxy is working. IP:", response.text)
                 return True
             else:
-                print(f"Proxy returned status code: {response.status_code}")
+                logging.warning(f"Proxy returned status code: {response.status_code}")
     except httpx.HTTPStatusError as e:
-        print(f"HTTP error occurred: {e}")
+        logging.warning(f"HTTP error occurred: {e}")
     except httpx.RequestError as e:
-        print(f"Request error occurred: {e}")
+        logging.warning(f"Request error occurred: {e}")
     except Exception as e:
-        print(f"Other error occurred: {e}")
+        logging.warning(f"Other error occurred: {e}")
     
-    print("Proxy is not working.")
+    logging.warning("Proxy is not working.")
     return False

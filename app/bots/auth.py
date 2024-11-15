@@ -22,31 +22,38 @@ class TelegramLogin:
         self.phone_number = account.number
         self.two_code = account.two_auth_code
 
-        try:
-            # Parse the proxy from account data
-            scheme = account.proxy.split("://")[0]
-            parsed_proxy = account.proxy.split("://")[1].split(":")
-            proxy = {
-                "hostname": parsed_proxy[1].split("@")[1],
-                "port": int(parsed_proxy[2]),
-                "username": parsed_proxy[0],
-                "password": parsed_proxy[1].split("@")[0],
-                "scheme": scheme,
-            }
-        except Exception as e:
-            await message.answer(
-                f"Невалідний проксі {account.proxy} для номера {account.number}",
-                reply_markup=self.account_managment,
-            )
-            return
+        proxy_str = account.proxy
+        if account.proxy:
+            if "http" not in account.proxy:
+                proxy_str = "http://" + proxy_str
+                
+            try:
+                # Parse the proxy from account data
+                scheme = proxy_str.split("://")[0]
+                parsed_proxy = proxy_str.split("://")[1].split(":")
+                proxy = {
+                    "hostname": parsed_proxy[1].split("@")[1],
+                    "port": int(parsed_proxy[2]),
+                    "username": parsed_proxy[0],
+                    "password": parsed_proxy[1].split("@")[0],
+                    "scheme": scheme,
+                }
+            except Exception as e:
+                await message.answer(
+                    f"Невалідний проксі {account.proxy} для номера {account.number}",
+                    reply_markup=self.account_managment,
+                )
+                return
 
-        # Check if the proxy is working
-        result = await is_proxy_working(account.proxy)
-        if not result:
-            await message.answer(
-                f"Помилка при підключенні до Telegram (Проксі не дає відповідь)", reply_markup=self.account_managment
-            )
-            return
+            # Check if the proxy is working
+            result = await is_proxy_working(proxy)
+            if not result:
+                await message.answer(
+                    f"Помилка при підключенні до Telegram (Проксі не дає відповідь)", reply_markup=self.account_managment
+                )
+                return
+        else:
+            proxy = account.proxy
 
         # Initialize the client if not already connected
         if not self.app or not self.app.is_connected:
@@ -82,7 +89,7 @@ class TelegramLogin:
         except SessionPasswordNeeded:
             try:
                 await self.app.check_password(self.two_code)
-                await message.answer("Авторизація успішна!", reply_markup=self.account_managment)
+                await message.answer("Авторизація 2FA успішна!", reply_markup=self.account_managment)
                 await rq.orm_change_account_session_status(self.phone_number, True)
             except PasswordHashInvalid:
                 await message.answer("Неправильний пароль 2FA. Спробуйте ще раз.", reply_markup=self.account_managment)

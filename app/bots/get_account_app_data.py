@@ -11,10 +11,48 @@ class AuthTgAPI:
         self.page = None
         self.playwright = None
 
-    async def initialize_browser(self):
+    async def initialize_browser(self, account):
         # Ініціалізуємо playwright і браузер
         self.playwright = await async_playwright().start()
-        self.browser = await self.playwright.chromium.launch(headless=False)
+        
+        # Define the proxy settings
+        proxy_str = account.proxy
+        if account.proxy:
+            if "http" not in account.proxy:
+                proxy_str = "http://" + proxy_str
+                
+            try:
+                # Parse the proxy from account data
+                scheme = proxy_str.split("://")[0]
+                parsed_proxy = proxy_str.split("://")[1].split(":")
+                proxy = {
+                    "hostname": parsed_proxy[1].split("@")[1],
+                    "port": int(parsed_proxy[2]),
+                    "username": parsed_proxy[0],
+                    "password": parsed_proxy[1].split("@")[0],
+                    "scheme": scheme,
+                }
+            except Exception as e:
+                await message.answer(
+                    f"Невалідний проксі {account.proxy} для номера {account.number}",
+                    reply_markup=self.account_managment,
+                )
+                return
+
+            # Check if the proxy is working
+            result = await is_proxy_working(proxy)
+            if not result:
+                await message.answer(
+                    f"Помилка при підключенні до Telegram (Проксі не дає відповідь)", reply_markup=self.account_managment
+                )
+                return
+        else:
+            proxy = account.proxy
+
+        # Launch the browser with proxy settings
+        self.browser = await self.playwright.chromium.launch(
+            proxy=proxy
+        )
         self.page = await self.browser.new_page(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
         )
@@ -32,7 +70,7 @@ class AuthTgAPI:
         try:
             # Перевіряємо чи браузер ініціалізовано
             if not self.browser or not self.page:
-                await self.initialize_browser()
+                await self.initialize_browser(account)
 
             # Переходимо на сторінку авторизації
             await self.page.goto("https://my.telegram.org/auth")

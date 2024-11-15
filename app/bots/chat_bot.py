@@ -95,24 +95,36 @@ class ChatJoiner:
                     if not self.phone_number:
                         continue
 
-                    try:
-                        # Parse the proxy from account data
-                        scheme = account.proxy.split("://")[0]
-                        parsed_proxy = account.proxy.split("://")[1].split(":")
-                        proxy = {
-                            "hostname": parsed_proxy[1].split("@")[1],
-                            "port": int(parsed_proxy[2]),
-                            "username": parsed_proxy[0],
-                            "password": parsed_proxy[1].split("@")[0],
-                            "scheme": scheme,
-                        }
-                    except Exception as e:
+                    proxy_str = account.proxy
+                    if account.proxy:
+                        if "http" not in account.proxy:
+                            proxy_str = "http://" + proxy_str
+                            
+                        try:
+                            # Parse the proxy from account data
+                            scheme = proxy_str.split("://")[0]
+                            parsed_proxy = proxy_str.split("://")[1].split(":")
+                            proxy = {
+                                "hostname": parsed_proxy[1].split("@")[1],
+                                "port": int(parsed_proxy[2]),
+                                "username": parsed_proxy[0],
+                                "password": parsed_proxy[1].split("@")[0],
+                                "scheme": scheme,
+                            }
+                        except Exception as e:
+                            await self.message.answer(
+                                f"Невалідний проксі {account.proxy} для номера {account.number}",
+                                reply_markup=self.account_managment,
+                            )
+                            return
+                    else:
+                        proxy = account.proxy
+                    
+                    result = await is_proxy_working(proxy)
+                    if not result:
                         await self.message.answer(
-                            f"Невалідний проксі {account.proxy} для номера {account.number}",
-                            reply_markup=self.account_managment,
+                            f"Помилка при підключенні до Telegram (Проксі не дає відповідь)", reply_markup=self.account_managment
                         )
-                        return
-
                     
                     await orm_update_account(self.phone_number, is_active=True)
 
@@ -122,15 +134,15 @@ class ChatJoiner:
 
                             try:
                                 try:
-                                    chat = await client.get_chat(chat_url)
+                                    chat = await client.get_chat(session.chat_url)
                                     await client.get_chat_member(
                                         chat.id, client.me.id
                                     )
-                                except UserNotParticipant:
-                                    await client.join_chat(chat_url)
+                                except (AttributeError, UserNotParticipant) as e:
+                                    await client.join_chat(session.chat_url)
 
                                 async for group in client.get_dialogs():
-                                    if group.chat.username == chat_url:
+                                    if group.chat.id == chat.id:
                                         if client.me.username not in usernames:
                                             usernames.append(client.me.username)
                                             await client.read_chat_history(group.chat.id)
@@ -156,12 +168,30 @@ class ChatJoiner:
                                     await asyncio.sleep(sleep_time / 2)
                                     self.sent_answer = False
 
-                                await client.send_message(chat_url, str(dialog.message))
+                                await client.send_message(chat.id, str(dialog.message))
 
                                 logger.info(f"Sleep time: {sleep_time}")
 
-                            except (ChannelPrivate, UsernameInvalid, UsernameNotOccupied, InviteRequestSent) as e:
+                            except (ChannelPrivate, UsernameInvalid, UsernameNotOccupied) as e:
                                 logging.error(f"Error: {e}\n\n{chat_url}")
+                                
+                                if isinstance(e, ChannelPrivate):
+                                    # Якщо канал або група приватні, робимо запит для доступу
+                                    logging.info(f"Запит доступу до приватного каналу: {chat_url}")
+                                    # Код для запиту доступу або перевірки статусу, наприклад, відправка запиту на запрошення
+                                    await self.send_invite_request(session.chat_url)
+                                
+                                elif isinstance(e, UsernameInvalid):
+                                    logging.error(f"Невірне ім'я користувача: {chat_url}")
+                                
+                                elif isinstance(e, UsernameNotOccupied):
+                                    logging.error(f"Канал з таким іменем не існує: {chat_url}")
+                                
+                                continue
+
+                            except InviteRequestSent as e:
+                                logging.warning(f"Запит на запрошення вже надіслано для: {chat_url}")
+                                # Тут можливо варто реалізувати логіку для повторної спроби або інших дій
                                 continue
                             except UserDeactivatedBan as e:
                                 # Handle user deactivation or ban
@@ -170,21 +200,12 @@ class ChatJoiner:
                                 return
                             except Exception as e:
                                 logger.warning(f"Error: {e}\n\n{chat_url}")
-                                await self.message.bot.send_message(
-                                    chat_id=os.getenv("DEV_CHAT_ID"),
-                                    text=f"Error: {e}\n\n{chat_url}",
-                                )
                     except UserDeactivatedBan as e:
                         logging.error(f"User deactivated or banned during client initialization: {e}")
                         await self.message.answer(f"Користувач деактивований або забанений: {self.phone_number}", reply_markup=self.admin_menu)
                         return
                     except Exception as e:
                         logger.warning(f"Error initializing client: {e}")
-                        await self.message.bot.send_message(
-                            chat_id=os.getenv("DEV_CHAT_ID"),
-                            text=f"Error initializing client: {e}",
-                        )
-                        return
                 finally:
                     await orm_update_account(self.phone_number, is_active=False)
                     logging.info(f"Sleep time: {sleep_time}")
@@ -208,3 +229,13 @@ class ChatJoiner:
             self.phone_number = None
             clear_unique_message(self.phone_number)
             await orm_update_session(session_id, is_active=False)
+
+    async def send_invite_request(client: Client, chat_url: str):
+        # Логіка відправки запиту на запрошення
+        # Тут можеш додати код для надсилання запиту або повідомлення адміну каналу
+        try:
+            # Отправляємо запит на запрошення (якщо це можливо)
+            await client.send_message(chat_url, "Запит на приєднання до каналу")
+            logging.info(f"Запит на запрошення на канал {chat_url} був надісланий.")
+        except Exception as e:
+            logging.error(f"Не вдалося надіслати запит на канал {chat_url}: {e}")
