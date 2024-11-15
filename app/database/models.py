@@ -49,6 +49,9 @@ class Session(Base):
     answer_time: Mapped[str] = mapped_column(Text, nullable=True)
     is_dialog_created: Mapped[bool] = mapped_column(Boolean, default=False)
     instructions: Mapped[str] = mapped_column(Text, nullable=True)
+    prompt: Mapped[str] = mapped_column(Text, nullable=True)
+    
+    accounts: Mapped[list] = mapped_column(MutableList.as_mutable(ARRAY(String)), nullable=True)
 
 
 class Account(Base):

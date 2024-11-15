@@ -12,7 +12,7 @@ from pyrogram.errors import (
     UsernameInvalid,
     UsernameNotOccupied,
     InviteRequestSent,
-    UserDeactivatedBan
+    UserDeactivatedBan,
 )
 
 from app.database.orm_query import (
@@ -22,7 +22,14 @@ from app.database.orm_query import (
     orm_update_account,
     orm_update_session,
 )
-from app.utils.helpers import generate_answer_for_user, is_proxy_working, random_number, write_unique_message, clear_unique_message
+from app.utils.helpers import (
+    generate_answer_for_user,
+    is_proxy_working,
+    random_number,
+    write_unique_message,
+    clear_unique_message,
+    continue_dialog,
+)
 
 logger = logging.getLogger(__name__)
 load_dotenv()
@@ -99,7 +106,7 @@ class ChatJoiner:
                     if account.proxy:
                         if "http" not in account.proxy:
                             proxy_str = "http://" + proxy_str
-                            
+
                         try:
                             # Parse the proxy from account data
                             scheme = proxy_str.split("://")[0]
@@ -119,25 +126,26 @@ class ChatJoiner:
                             return
                     else:
                         proxy = account.proxy
-                    
+
                     result = await is_proxy_working(proxy)
                     if not result:
                         await self.message.answer(
-                            f"Помилка при підключенні до Telegram (Проксі не дає відповідь)", reply_markup=self.account_managment
+                            f"Помилка при підключенні до Telegram (Проксі не дає відповідь)",
+                            reply_markup=self.account_managment,
                         )
-                    
+
                     await orm_update_account(self.phone_number, is_active=True)
 
                     try:
-                        async with Client(f"sessions/{self.phone_number}", proxy=proxy) as client:
+                        async with Client(
+                            f"sessions/{self.phone_number}", proxy=proxy
+                        ) as client:
                             chat_url = session.chat_url.split("/")[-1]
 
                             try:
                                 try:
                                     chat = await client.get_chat(session.chat_url)
-                                    await client.get_chat_member(
-                                        chat.id, client.me.id
-                                    )
+                                    await client.get_chat_member(chat.id, client.me.id)
                                 except (AttributeError, UserNotParticipant) as e:
                                     await client.join_chat(session.chat_url)
 
@@ -145,26 +153,56 @@ class ChatJoiner:
                                     if group.chat.id == chat.id:
                                         if client.me.username not in usernames:
                                             usernames.append(client.me.username)
-                                            await client.read_chat_history(group.chat.id)
+                                            await client.read_chat_history(
+                                                group.chat.id
+                                            )
                                             continue
-                                        
+
                                         if group.unread_messages_count > 0:
-                                            print(f"Unread messages in chat with ID {group.chat.id}: {group.unread_messages_count}")
-                                            await client.read_chat_history(group.chat.id)
-                                            async for group_message in client.get_chat_history(group.chat.id, limit=group.unread_messages_count):
-                                                if group_message.from_user.username not in usernames:
-                                                    result = write_unique_message(self.phone_number, group_message.text)
+                                            print(
+                                                f"Unread messages in chat with ID {group.chat.id}: {group.unread_messages_count}"
+                                            )
+                                            await client.read_chat_history(
+                                                group.chat.id
+                                            )
+                                            async for (
+                                                group_message
+                                            ) in client.get_chat_history(
+                                                group.chat.id,
+                                                limit=group.unread_messages_count,
+                                            ):
+                                                if (
+                                                    group_message.from_user.username
+                                                    not in usernames
+                                                ):
+                                                    result = write_unique_message(
+                                                        self.phone_number,
+                                                        group_message.text,
+                                                    )
 
                                                     if result:
-                                                        print(f"From {group_message.from_user.first_name}: {group_message.text}")
-                                                        answer = await generate_answer_for_user(session_id, group_message.text, self.message, self.admin_menu)
+                                                        print(
+                                                            f"From {group_message.from_user.first_name}: {group_message.text}"
+                                                        )
+                                                        answer = await generate_answer_for_user(
+                                                            session_id,
+                                                            group_message.text,
+                                                            self.message,
+                                                            self.admin_menu,
+                                                        )
 
                                                         if answer:
-                                                            await client.send_message(group.chat.id, text=answer, reply_to_message_id=group_message.id)
+                                                            await client.send_message(
+                                                                group.chat.id,
+                                                                text=answer,
+                                                                reply_to_message_id=group_message.id,
+                                                            )
                                                             self.sent_answer = True
 
                                 if self.sent_answer:
-                                    logging.info(f"Answer got. Sleep time: {sleep_time}")
+                                    logging.info(
+                                        f"Answer got. Sleep time: {sleep_time}"
+                                    )
                                     await asyncio.sleep(sleep_time / 2)
                                     self.sent_answer = False
 
@@ -172,37 +210,59 @@ class ChatJoiner:
 
                                 logger.info(f"Sleep time: {sleep_time}")
 
-                            except (ChannelPrivate, UsernameInvalid, UsernameNotOccupied) as e:
+                            except (
+                                ChannelPrivate,
+                                UsernameInvalid,
+                                UsernameNotOccupied,
+                            ) as e:
                                 logging.error(f"Error: {e}\n\n{chat_url}")
-                                
+
                                 if isinstance(e, ChannelPrivate):
                                     # Якщо канал або група приватні, робимо запит для доступу
-                                    logging.info(f"Запит доступу до приватного каналу: {chat_url}")
+                                    logging.info(
+                                        f"Запит доступу до приватного каналу: {chat_url}"
+                                    )
                                     # Код для запиту доступу або перевірки статусу, наприклад, відправка запиту на запрошення
                                     await self.send_invite_request(session.chat_url)
-                                
+
                                 elif isinstance(e, UsernameInvalid):
-                                    logging.error(f"Невірне ім'я користувача: {chat_url}")
-                                
+                                    logging.error(
+                                        f"Невірне ім'я користувача: {chat_url}"
+                                    )
+
                                 elif isinstance(e, UsernameNotOccupied):
-                                    logging.error(f"Канал з таким іменем не існує: {chat_url}")
-                                
+                                    logging.error(
+                                        f"Канал з таким іменем не існує: {chat_url}"
+                                    )
+
                                 continue
 
                             except InviteRequestSent as e:
-                                logging.warning(f"Запит на запрошення вже надіслано для: {chat_url}")
+                                logging.warning(
+                                    f"Запит на запрошення вже надіслано для: {chat_url}"
+                                )
                                 # Тут можливо варто реалізувати логіку для повторної спроби або інших дій
                                 continue
                             except UserDeactivatedBan as e:
                                 # Handle user deactivation or ban
-                                logging.error(f"User deactivated or banned: {e}\n\n{chat_url}")
-                                await self.message.answer(f"Користувач деактивований або забанений: {chat_url}", reply_markup=self.admin_menu)
+                                logging.error(
+                                    f"User deactivated or banned: {e}\n\n{chat_url}"
+                                )
+                                await self.message.answer(
+                                    f"Користувач деактивований або забанений: {chat_url}",
+                                    reply_markup=self.admin_menu,
+                                )
                                 return
                             except Exception as e:
                                 logger.warning(f"Error: {e}\n\n{chat_url}")
                     except UserDeactivatedBan as e:
-                        logging.error(f"User deactivated or banned during client initialization: {e}")
-                        await self.message.answer(f"Користувач деактивований або забанений: {self.phone_number}", reply_markup=self.admin_menu)
+                        logging.error(
+                            f"User deactivated or banned during client initialization: {e}"
+                        )
+                        await self.message.answer(
+                            f"Користувач деактивований або забанений: {self.phone_number}",
+                            reply_markup=self.admin_menu,
+                        )
                         return
                     except Exception as e:
                         logger.warning(f"Error initializing client: {e}")
@@ -212,8 +272,9 @@ class ChatJoiner:
                     await asyncio.sleep(sleep_time)
 
             await self.message.answer(
-                "Ділоги закінчились. Процес зупинено.", reply_markup=self.admin_menu
+                "Ділоги закінчились. Генерую нові...", reply_markup=self.admin_menu
             )
+            await continue_dialog(session.prompt, dialogs[:20], session.id, self.message)
 
         except Exception as e:
             # Handle general errors

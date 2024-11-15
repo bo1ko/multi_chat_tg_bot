@@ -1,3 +1,4 @@
+import ast
 import asyncio
 import os
 
@@ -252,7 +253,9 @@ async def account_list(message: Message, state: FSMContext):
     account_messages.append(msg.message_id)
 
     if not accounts:
-        await message.answer("Список аккаунтів порожній", reply_markup=account_managment)
+        await message.answer(
+            "Список аккаунтів порожній", reply_markup=account_managment
+        )
         return
 
     for account in accounts:
@@ -267,11 +270,14 @@ async def account_list(message: Message, state: FSMContext):
             if account.is_session_created:
                 text += f"ID сесіі: {account.session_id}\n"
 
-        btns = {'Редагувати': f"edit_account_{account.id}"}
-        msg = await message.answer(text, reply_markup=get_callback_btns(btns=btns, sizes=(1,)))
+        btns = {"Редагувати": f"edit_account_{account.id}"}
+        msg = await message.answer(
+            text, reply_markup=get_callback_btns(btns=btns, sizes=(1,))
+        )
         account_messages.append(msg.message_id)
-        
+
     await state.update_data(account_messages=account_messages)
+
 
 @router.callback_query(F.data.startswith("edit_account_"))
 async def edit_account(callback: CallbackQuery, state: FSMContext):
@@ -289,62 +295,74 @@ async def edit_account(callback: CallbackQuery, state: FSMContext):
         except Exception as e:
             # Handle any exceptions, for example if the message is already deleted
             print(f"Failed to delete message {msg_id}: {e}")
-    
+
     if account:
         btns = {
-            'Змінити код': f"change_two_auth_code_{account.id}",
-            'Змінити проксі': f"change_proxy_{account.id}",
-            'Назад': f"back_to_account_list",
+            "Змінити код": f"change_two_auth_code_{account.id}",
+            "Змінити проксі": f"change_proxy_{account.id}",
+            "Назад": f"back_to_account_list",
         }
-        await callback.message.answer(f"Аккаунт:\nНомер: <code>{account.number}</code>\nКод: <code>{account.two_auth_code}</code>\nПроксі: <code>{account.proxy}</code>", reply_markup=get_callback_btns(btns=btns, sizes=(1,)))
+        await callback.message.answer(
+            f"Аккаунт:\nНомер: <code>{account.number}</code>\nКод: <code>{account.two_auth_code}</code>\nПроксі: <code>{account.proxy}</code>",
+            reply_markup=get_callback_btns(btns=btns, sizes=(1,)),
+        )
+
 
 @router.callback_query(F.data.startswith("change_two_auth_code_"))
 async def change_two_auth_code(callback: CallbackQuery, state: FSMContext):
     account_id = int(callback.data.split("_")[-1])
-    
+
     await callback.message.delete()
-    await callback.message.answer('Введіть 2-х код:', reply_markup=back_account_managment)
+    await callback.message.answer(
+        "Введіть 2-х код:", reply_markup=back_account_managment
+    )
     await state.set_data({"account_id": account_id})
     await state.set_state(AccountState.two_code)
+
 
 @router.message(AccountState.two_code)
 async def change_two_auth_code_second(message: Message, state: FSMContext):
     two_code = message.text
     account_id = await state.get_value("account_id")
 
-    result = await rq.orm_update_account_by_id(account_id, two_auth_code=two_code)  
-    
+    result = await rq.orm_update_account_by_id(account_id, two_auth_code=two_code)
+
     if result:
         await message.answer("2-х код успішно змінено")
     else:
         await message.answer("2-х код не змінено")
-    
+
     await state.clear()
     await account_list(message, state)
+
 
 @router.callback_query(F.data.startswith("change_proxy_"))
 async def change_proxy(callback: CallbackQuery, state: FSMContext):
     account_id = int(callback.data.split("_")[-1])
-    
+
     await callback.message.delete()
-    await callback.message.answer('Введіть проксі:', reply_markup=back_account_managment)
+    await callback.message.answer(
+        "Введіть проксі:", reply_markup=back_account_managment
+    )
     await state.set_data({"account_id": account_id})
     await state.set_state(AccountState.proxy)
+
 
 @router.message(AccountState.proxy)
 async def change_proxy_second(message: Message, state: FSMContext):
     proxy = message.text
     account_id = await state.get_value("account_id")
 
-    result = await rq.orm_update_account_by_id(account_id, proxy=proxy)  
-    
+    result = await rq.orm_update_account_by_id(account_id, proxy=proxy)
+
     if result:
         await message.answer("Проксі успішно змінено")
     else:
         await message.answer("Проксі не змінено")
-    
+
     await state.clear()
     await account_list(message, state)
+
 
 @router.callback_query(F.data == "back_to_account_list")
 async def back_to_account_list(callback: CallbackQuery, state: FSMContext):
@@ -352,12 +370,16 @@ async def back_to_account_list(callback: CallbackQuery, state: FSMContext):
     account_messages = []
 
     await callback.answer()
-    
+
     if not accounts:
-        await callback.message.answer("Список аккаунтів порожній", reply_markup=account_managment)
+        await callback.message.answer(
+            "Список аккаунтів порожній", reply_markup=account_managment
+        )
         return
 
-    msg = await callback.message.answer("Список аккаунтів 👇", reply_markup=account_managment)
+    msg = await callback.message.answer(
+        "Список аккаунтів 👇", reply_markup=account_managment
+    )
     account_messages.append(msg.message_id)
 
     for account in accounts:
@@ -372,11 +394,14 @@ async def back_to_account_list(callback: CallbackQuery, state: FSMContext):
             if account.is_session_created:
                 text += f"ID сесії: {account.session_id}\n"
 
-        btns = {'Редагувати': f"edit_account_{account.id}"}
-        msg = await callback.message.answer(text, reply_markup=get_callback_btns(btns=btns, sizes=(1,)))
+        btns = {"Редагувати": f"edit_account_{account.id}"}
+        msg = await callback.message.answer(
+            text, reply_markup=get_callback_btns(btns=btns, sizes=(1,))
+        )
         account_messages.append(msg.message_id)
-    
+
     await state.update_data(account_messages=account_messages)
+
 
 # add accounts
 @router.message(ACCOUNT_MANAGMENT_KB_NAMES["add_accounts"] == F.text)
@@ -476,21 +501,25 @@ auth_task = None
 @router.message(ACCOUNT_MANAGMENT_KB_NAMES["telegram_auth_proccess"] == F.text)
 async def api_auth(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer('Виберіть номер для авторизації', reply_markup=back_account_managment)
+    await message.answer(
+        "Виберіть номер для авторизації", reply_markup=back_account_managment
+    )
 
     accounts = await rq.orm_get_authorized_accounts_without_session()
     btns = {}
-    
+
     for account in accounts:
-        btns[f'{account.number}'] = f'start_auth_tg_{account.id}'
-        
-    await message.answer(f'Номера 📱', reply_markup=get_callback_btns(btns=btns, sizes=(1,)))
-    
+        btns[f"{account.number}"] = f"start_auth_tg_{account.id}"
+
+    await message.answer(
+        f"Номера 📱", reply_markup=get_callback_btns(btns=btns, sizes=(1,))
+    )
+
 
 @router.callback_query(F.data.startswith("start_auth_tg_"))
 async def start_auth_tg(callback: CallbackQuery, state: FSMContext):
     global auth_task, login_manager
-    
+
     account_id = int(callback.data.split("_")[-1])
 
     if auth_task and not auth_task.done():
@@ -503,7 +532,9 @@ async def start_auth_tg(callback: CallbackQuery, state: FSMContext):
 
     # await login_manager.start_login(callback.message, state)
     login_manager = TelegramLogin(account_managment)
-    auth_task = asyncio.create_task(login_manager.start_login(callback.message, account))
+    auth_task = asyncio.create_task(
+        login_manager.start_login(callback.message, account)
+    )
     await state.set_state(Auth.code)
 
 
@@ -561,6 +592,8 @@ class SessionState(StatesGroup):
     answer_time = State()
     set_instructions = State()
     edit_instructions = State()
+    get_free_accounts = State()
+    select_free_account = State()
 
     remove_session = State()
 
@@ -630,6 +663,8 @@ async def add_session_fifth_wrong(message: types.Message):
 @router.message(SessionState.prompt, F.text)
 async def add_session_third(message: Message, state: FSMContext):
     prompt = message.text
+    
+    await state.update_data(prompt=prompt)
 
     result = await generate_dialogs(prompt, message, back_from_add_session)
 
@@ -719,9 +754,10 @@ async def add_session_fifth(message: Message, state: FSMContext):
     session_type = data.get("session_type")
     data_json = data.get("data_json")
     chat_url = data.get("chat_url")
+    prompt = data.get("prompt")
 
     add_session = await rq.orm_add_session(
-        session_type, data_json, chat_url, message.text
+        session_type, data_json, chat_url, message.text, prompt
     )
 
     if add_session:
@@ -730,33 +766,101 @@ async def add_session_fifth(message: Message, state: FSMContext):
             f"Назва: {session_type}\nЮрл чату: {chat_url}\nСередній час відповіді: {message.text}",
             reply_markup=session_managment,
         )
+
         await message.answer(
             "Починаю розприділяти ролі по аккаунтам", reply_markup=session_managment
         )
 
         accounts = await rq.orm_get_free_accounts()
-        session = await rq.orm_get_session(add_session.id)
-        result_status, result_text = await roles_distribution(
-            session.id, accounts, session.data
-        )
 
-        if result_status:
+        data_list = ast.literal_eval(data_json)
+        user_ids = {message["user_id"] for message in data_list}
+        unique_users_count = len(user_ids)
+
+        if unique_users_count > len(accounts):
             await message.answer(
-                f"Результат: {result_text}", reply_markup=session_managment
+                "Недостатньо аккаунтів для розприділення ролів",
+                reply_markup=session_managment,
             )
-            await rq.orm_update_session(add_session.id, is_dialog_created=True)
+            await state.clear()
+            return
         else:
-            await message.answer(result_text, reply_markup=session_managment)
+            await state.set_data({"session_id": add_session.id, "unique_users_count": unique_users_count})
+            await add_session_sixth(message, state)
+
+        # session = await rq.orm_get_session(add_session.id)
+        # result_status, result_text = await roles_distribution(
+        #     session.id, accounts, session.data
+        # )
+
+        # if result_status:
+        #     await message.answer(
+        #         f"Результат: {result_text}", reply_markup=session_managment
+        #     )
+        #     await rq.orm_update_session(add_session.id, is_dialog_created=True)
+        # else:
+        #     await message.answer(result_text, reply_markup=session_managment)
     else:
         await message.answer("Щось пішло не так.. Спробуйте знову!")
-
-    await state.clear()
+        await state.clear()
 
 
 @router.message(SessionState.answer_time)
 async def add_session_fifth_wrong(message: types.Message):
     await message.answer("Ви ввели недопустимі дані, введіть провіжок часу знову")
 
+
+@router.message(SessionState.get_free_accounts)
+async def add_session_sixth(message: Message, state: FSMContext):
+    accounts = await rq.orm_get_free_accounts()
+    session = await rq.orm_get_session(await state.get_value("session_id"))
+    unique_users_count = await state.get_value("unique_users_count")
+    btns = {}
+    
+    await message.delete()
+
+    for account in accounts:
+        if not session.accounts:
+            btns[f"{account.number}"] = f"select_account_{account.id}"
+        else:
+            if str(account.id) not in session.accounts:
+                btns[f"{account.number}"] = f"select_account_{account.id}"
+
+    if int(unique_users_count) == 0:
+        await message.answer(
+            "Аккаунти вибрані",
+            reply_markup=session_managment,
+        )
+        await state.clear()
+        return
+    
+    if int(unique_users_count) == 1:
+        await message.answer(
+            "Виберіть ще 1 аккаунт",
+            reply_markup=get_callback_btns(btns=btns, sizes=(1,)),
+        )
+    else:
+        await message.answer(
+            f"Виберіть ще {unique_users_count} аккаунтів",
+            reply_markup=get_callback_btns(btns=btns, sizes=(2,)),
+        )
+    
+    await state.update_data({"unique_users_count":int(unique_users_count) - 1, "session_id": session.id})
+    
+@router.callback_query(F.data.startswith("select_account_"))
+async def select_account(callback: CallbackQuery, state: FSMContext):
+    account_id = callback.data.split("_")[-1]
+    session_id = await state.get_value('session_id')
+
+    result = await rq.orm_update_session_add_account(int(session_id), account_id)
+
+    if result:
+        await add_session_sixth(callback.message, state)
+        return
+    else:
+        await callback.message.answer("Щось пішло не так.. Спробуйте знову!")
+        await state.clear()
+        
 
 # session list
 @router.message(SESSION_MANAGMENT_KB_NAMES["session_list"] == F.text)
@@ -797,26 +901,37 @@ async def session_list(callback: CallbackQuery):
 
 # session settings
 @router.callback_query(F.data.startswith("session_settings_"))
-async def session_settings(callback: CallbackQuery):
+async def session_settings(callback: CallbackQuery, state: FSMContext):
     session_id = int(callback.data.split("_")[-1])
     session = await rq.orm_get_session(session_id)
 
     if session:
         await callback.answer()
-
+        
+        data_list = ast.literal_eval(session.data)
+        user_ids = {message["user_id"] for message in data_list}
+        unique_users_count = len(user_ids)
         text = f"Активна сесія: {'✅' if session.is_active else '❌'}\nID: <code>{session.id}</code>\nСесія: {session.session_type}\nЧат: {session.chat_url}\nЧас відповіді: {session.answer_time}\n"
-
-        if session.instructions:
-            text += f"Інструкція: {session.instructions}"
         btns = {}
 
-        if not session.is_dialog_created:
-            btns["Створити діалог"] = f"start_dialog_{session.id}"
-        else:
-            if session.is_active:
-                btns["Зупинити сесію"] = f"stop_session_{session.id}"
+        if session.accounts:
+            if unique_users_count > len(session.accounts):
+                btns['Добавити аккаунти'] = f"add_accounts_to_session_{session.id}"
+                await state.update_data(unique_users_count=unique_users_count)
             else:
-                btns["Розпочати сесію"] = f"start_session_{session.id}"
+                if session.instructions:
+                    text += f"Інструкція: {session.instructions}"
+
+                if not session.is_dialog_created:
+                    btns["Створити діалог"] = f"start_dialog_{session.id}"
+                else:
+                    if session.is_active:
+                        btns["Зупинити сесію"] = f"stop_session_{session.id}"
+                    else:
+                        btns["Розпочати сесію"] = f"start_session_{session.id}"
+        else:
+            btns['Добавити аккаунти'] = f"add_accounts_to_session_{session.id}"
+            await state.update_data(unique_users_count=unique_users_count)
 
         btns["Назад"] = "session_list"
 
@@ -824,7 +939,12 @@ async def session_settings(callback: CallbackQuery):
             text, reply_markup=get_callback_btns(btns=btns, sizes=(1,))
         )
 
-
+@router.callback_query(F.data.startswith("add_accounts_to_session_"))
+async def add_accounts_to_session(callback: CallbackQuery, state: FSMContext):
+    session_id = int(callback.data.split("_")[-1])
+    await state.update_data(session_id=session_id)
+    await add_session_sixth(callback.message, state)
+    
 @router.callback_query(F.data.startswith("start_dialog_"))
 async def start_dialog(callback: CallbackQuery, state: FSMContext):
     session_id = int(callback.data.split("_")[-1])

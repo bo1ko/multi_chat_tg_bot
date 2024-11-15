@@ -188,7 +188,7 @@ async def orm_get_free_accounts():
         async with session.begin():
             try:
                 print('!' * 10)
-                query = select(Account).where((Account.is_session_created == True) & (Account.is_active == False))
+                query = select(Account).where((Account.is_session_created == True))
                 result = await session.execute(query)
                 accounts = result.scalars().all()
                 print('!' * 10, accounts)
@@ -382,7 +382,7 @@ async def orm_get_session(id: int):
 
 # ---------- ADD SESSION ----------
 async def orm_add_session(
-    session_type: str, data_json: str, chat_url: str, answer_time: str
+    session_type: str, data_json: str, chat_url: str, answer_time: str, prompt: str, accounts = None
 ):
     async with session_maker() as session:
         async with session.begin():
@@ -392,6 +392,8 @@ async def orm_add_session(
                     data=data_json,
                     answer_time=answer_time,
                     chat_url=chat_url,
+                    prompt=prompt,
+                    accounts=accounts
                 )
                 session.add(obj)
                 await session.commit()
@@ -425,6 +427,27 @@ async def orm_update_session(id: int, **kwargs):
             except Exception as e:
                 print(e)
                 return False
+
+# ---------- UPDATE SESSION ADD ACCOUNT ----------
+async def orm_update_session_add_account(session_id: int, account_id: str):
+    async with session_maker() as session:
+        async with session.begin():
+            try:
+                db_session = await session.get(Session, session_id)
+
+                if db_session.accounts is None:
+                    db_session.accounts = []
+
+                if account_id not in db_session.accounts:
+                    db_session.accounts.append(account_id)
+
+                await session.commit()
+
+                return True
+            except Exception as e:
+                print(f"Error: {e}")
+                return False
+
 
 # ---------- ADD DIALOG ----------
 async def orm_add_dialog(session_id: int, account_id: int, message_id: int, message: str):
