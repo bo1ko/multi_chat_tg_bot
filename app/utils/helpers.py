@@ -88,10 +88,11 @@ async def generate_dialogs(prompt_text, message: Message, back_session_managment
         )
 
 
-async def continue_dialog(prompt_text, last_dialog, session_id, message: Message):
+async def continue_dialog(prompt_text, last_dialog, session_id, user_ids, message: Message):
     session = await orm_get_session(session_id)
     prompt_text += f"Prompt: {session.prompt}\n\n"
-    prompt_text += f"Based on the prompt above and this dialog, continue the dialog for another 2 messages"
+    prompt_text += f"User IDs: {user_ids}\n\n"
+    prompt_text += f"Based on the previous dialogues, please continue the conversation for another 50 messages, focusing on specific topics of conversation. Make sure the follow-up addresses current issues, provides relevant advice, and offers a solution or clarification based on shared contexts"
     prompt_text += f"\n\nLast dialog: {last_dialog}"
     prompt_text += """\n\n
     The answer must be in format like this, id values must start from 0. THIS IS JUST AN EXAMPLE OF RESPONSE:

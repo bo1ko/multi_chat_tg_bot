@@ -1,3 +1,4 @@
+import ast
 import asyncio
 import logging
 import os
@@ -87,6 +88,10 @@ class ChatJoiner:
 
                 usernames = []
 
+                data_list = ast.literal_eval(session.data)
+                user_ids = {message["user_id"] for message in data_list}
+                print(f'Кількість юзерів: {user_ids}')
+                
                 for count, dialog in enumerate(dialogs):
                     if self.dialog_id:
                         if dialog.id < self.dialog_id:
@@ -295,8 +300,9 @@ class ChatJoiner:
                 await self.message.answer(
                     "Ділоги закінчились. Генерую нові...", reply_markup=self.admin_menu
                 )
-                await continue_dialog(session.prompt, dialogs[:20], session.id, self.message)
+                await continue_dialog(session.prompt, dialogs[:20], session.id, user_ids, self.message)
                 await orm_update_session(session_id, is_active=False)
+                self.dialog_id += 1
 
         except Exception as e:
             # Handle general errors
