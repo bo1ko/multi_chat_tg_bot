@@ -200,6 +200,7 @@ ACCOUNT_MANAGMENT_KB_NAMES = {
     "account_list": "Список аккаунтів 📃",
     "add_accounts": "Добавити аккаунти 📲",
     "remove_account": "Видалити аккаунти 🗑️",
+    "api_auth_proccess": "Авторизація API ⚙",
     "telegram_auth_proccess": "Авторизація Telegram 🚀",
     "back_account_managment": '⬅️ Назад до меню "Аккаунти"',
 }
@@ -207,9 +208,10 @@ account_managment = get_keyboard(
     ACCOUNT_MANAGMENT_KB_NAMES["account_list"],
     ACCOUNT_MANAGMENT_KB_NAMES["add_accounts"],
     ACCOUNT_MANAGMENT_KB_NAMES["remove_account"],
+    ACCOUNT_MANAGMENT_KB_NAMES["api_auth_proccess"],
     ACCOUNT_MANAGMENT_KB_NAMES["telegram_auth_proccess"],
     BACK_TO_MENU["back_to_menu"],
-    sizes=(1, 2, 1),
+    sizes=(1, 2, 2, 1, 1),
 )
 back_account_managment = get_keyboard(
     ACCOUNT_MANAGMENT_KB_NAMES["back_account_managment"]
@@ -551,6 +553,60 @@ async def code_handler(message: types.Message, state: FSMContext):
         await message.answer("Будь ласка, введи коректний код підтвердження.")
 
 
+# ---------- API AUTH ----------
+class APIAuth(StatesGroup):
+    auth_status = State()
+    code = State()
+
+
+api_login_manager = None
+api_auth_task = None
+
+
+# api auth panel
+@router.message(ACCOUNT_MANAGMENT_KB_NAMES["api_auth_proccess"] == F.text)
+async def api_auth(message: Message):
+    await message.answer('Виберіть номер для авторизації', reply_markup=back_account_managment)
+    accounts = await rq.orm_get_authorized_accounts()
+    
+    if accounts:
+        btns = {}
+        for account in accounts:
+            btns[f'{account.number}'] = f'start_api_auth_tg_{account.id}'
+        
+        await message.answer(f'Номера 📱', reply_markup=get_callback_btns(btns=btns, sizes=(1,)))
+    else:
+        await message.answer('Немає номерів', reply_markup=account_managment)
+
+@router.callback_query(F.data.startswith('start_api_auth_tg_'))
+async def api_auth_second(callback: types.CallbackQuery, state: FSMContext):
+    global api_auth_task, api_login_manager
+    account_id = int(callback.data.split("_")[-1])
+    
+    
+    if api_auth_task and not api_auth_task.done():
+        api_auth_task.cancel()
+
+    await callback.message.edit_text("Розпочинаю Telegram API авторизацію...")
+    
+    account = await rq.orm_get_account_by_id(account_id)
+
+    api_login_manager = AuthTgAPI(account_managment)
+    api_auth_task = await api_login_manager.start_login(callback.message, account)
+    
+    await state.set_state(APIAuth.code)
+
+@router.message(APIAuth.code)
+async def code_handler(message: types.Message, state: FSMContext):
+    global api_login_manager
+
+    code_text = message.text
+    print('!' * 10, code_text)
+    
+    await api_login_manager.second_step(message, code_text)
+    await state.clear()
+    await api_auth(message)
+
 # ---------- SESSION ----------
 # session panel
 SESSION_MANAGMENT_KB_NAMES = {
@@ -663,7 +719,7 @@ async def add_session_fifth_wrong(message: types.Message):
 @router.message(SessionState.prompt, F.text)
 async def add_session_third(message: Message, state: FSMContext):
     prompt = message.text
-    
+
     await state.update_data(prompt=prompt)
 
     result = await generate_dialogs(prompt, message, back_from_add_session)
@@ -768,7 +824,7 @@ async def add_session_fifth(message: Message, state: FSMContext):
         )
 
         await message.answer(
-            "Починаю розприділяти ролі по аккаунтам", reply_markup=session_managment
+            "Пошук аккаунтів для сесії...", reply_markup=session_managment
         )
 
         accounts = await rq.orm_get_free_accounts()
@@ -785,21 +841,10 @@ async def add_session_fifth(message: Message, state: FSMContext):
             await state.clear()
             return
         else:
-            await state.set_data({"session_id": add_session.id, "unique_users_count": unique_users_count})
+            await state.set_data(
+                {"session_id": add_session.id, "unique_users_count": unique_users_count}
+            )
             await add_session_sixth(message, state)
-
-        # session = await rq.orm_get_session(add_session.id)
-        # result_status, result_text = await roles_distribution(
-        #     session.id, accounts, session.data
-        # )
-
-        # if result_status:
-        #     await message.answer(
-        #         f"Результат: {result_text}", reply_markup=session_managment
-        #     )
-        #     await rq.orm_update_session(add_session.id, is_dialog_created=True)
-        # else:
-        #     await message.answer(result_text, reply_markup=session_managment)
     else:
         await message.answer("Щось пішло не так.. Спробуйте знову!")
         await state.clear()
@@ -816,7 +861,7 @@ async def add_session_sixth(message: Message, state: FSMContext):
     session = await rq.orm_get_session(await state.get_value("session_id"))
     unique_users_count = await state.get_value("unique_users_count")
     btns = {}
-    
+
     await message.delete()
 
     for account in accounts:
@@ -831,9 +876,20 @@ async def add_session_sixth(message: Message, state: FSMContext):
             "Аккаунти вибрані",
             reply_markup=session_managment,
         )
+
+        await message.answer('Починаю розприділяти діалоги по аккаунтам')
+        result_status, result_text = await roles_distribution(session.id)
+        
+        if result_status:
+            await message.answer(
+                f"Результат: {result_text}", reply_markup=session_managment
+            )
+            await rq.orm_update_session(session.id, is_dialog_created=True)
+        else:
+            await message.answer(result_text, reply_markup=session_managment)
         await state.clear()
         return
-    
+
     if int(unique_users_count) == 1:
         await message.answer(
             "Виберіть ще 1 аккаунт",
@@ -844,13 +900,16 @@ async def add_session_sixth(message: Message, state: FSMContext):
             f"Виберіть ще {unique_users_count} аккаунтів",
             reply_markup=get_callback_btns(btns=btns, sizes=(2,)),
         )
-    
-    await state.update_data({"unique_users_count":int(unique_users_count) - 1, "session_id": session.id})
-    
+
+    await state.update_data(
+        {"unique_users_count": int(unique_users_count) - 1, "session_id": session.id}
+    )
+
+
 @router.callback_query(F.data.startswith("select_account_"))
 async def select_account(callback: CallbackQuery, state: FSMContext):
     account_id = callback.data.split("_")[-1]
-    session_id = await state.get_value('session_id')
+    session_id = await state.get_value("session_id")
 
     result = await rq.orm_update_session_add_account(int(session_id), account_id)
 
@@ -860,7 +919,7 @@ async def select_account(callback: CallbackQuery, state: FSMContext):
     else:
         await callback.message.answer("Щось пішло не так.. Спробуйте знову!")
         await state.clear()
-        
+
 
 # session list
 @router.message(SESSION_MANAGMENT_KB_NAMES["session_list"] == F.text)
@@ -907,7 +966,7 @@ async def session_settings(callback: CallbackQuery, state: FSMContext):
 
     if session:
         await callback.answer()
-        
+
         data_list = ast.literal_eval(session.data)
         user_ids = {message["user_id"] for message in data_list}
         unique_users_count = len(user_ids)
@@ -916,7 +975,7 @@ async def session_settings(callback: CallbackQuery, state: FSMContext):
 
         if session.accounts:
             if unique_users_count > len(session.accounts):
-                btns['Добавити аккаунти'] = f"add_accounts_to_session_{session.id}"
+                btns["Добавити аккаунти"] = f"add_accounts_to_session_{session.id}"
                 await state.update_data(unique_users_count=unique_users_count)
             else:
                 if session.instructions:
@@ -930,21 +989,23 @@ async def session_settings(callback: CallbackQuery, state: FSMContext):
                     else:
                         btns["Розпочати сесію"] = f"start_session_{session.id}"
         else:
-            btns['Добавити аккаунти'] = f"add_accounts_to_session_{session.id}"
+            btns["Добавити аккаунти"] = f"add_accounts_to_session_{session.id}"
             await state.update_data(unique_users_count=unique_users_count)
 
         btns["Назад"] = "session_list"
 
-        await callback.message.edit_text(
+        await callback.message.answer(
             text, reply_markup=get_callback_btns(btns=btns, sizes=(1,))
         )
+
 
 @router.callback_query(F.data.startswith("add_accounts_to_session_"))
 async def add_accounts_to_session(callback: CallbackQuery, state: FSMContext):
     session_id = int(callback.data.split("_")[-1])
     await state.update_data(session_id=session_id)
     await add_session_sixth(callback.message, state)
-    
+
+
 @router.callback_query(F.data.startswith("start_dialog_"))
 async def start_dialog(callback: CallbackQuery, state: FSMContext):
     session_id = int(callback.data.split("_")[-1])
@@ -954,14 +1015,10 @@ async def start_dialog(callback: CallbackQuery, state: FSMContext):
         "Починаю розприділяти ролі по аккаунтам"
     )
 
-    accounts = await rq.orm_get_free_accounts()
-    session = await rq.orm_get_session(session_id)
-    result_status, result_text = await roles_distribution(
-        session.id, accounts, session.data
-    )
+    result_status, result_text = await roles_distribution(session_id)
 
     if result_status:
-        await session_settings(callback)
+        await session_settings(callback, state)
 
         message_result = await callback.message.answer(f"Результат: {result_text}")
         await rq.orm_update_session(session_id, is_dialog_created=True)
@@ -988,7 +1045,7 @@ async def start_chatting_session(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Сесія не запустилась...", reply_markup=session_managment)
     else:
         await callback.answer("Сесія запущена", reply_markup=session_managment)
-        await session_settings(callback)
+        await session_settings(callback, state)
 
     await state.clear()
 
@@ -1000,7 +1057,7 @@ async def stop_chatting_session(callback: CallbackQuery, state: FSMContext):
     if chat_bot_task and not chat_bot_task.done():
         chat_bot_task.cancel()
         await callback.answer("Сесію зупинено", reply_markup=session_managment)
-        await session_settings(callback)
+        await session_settings(callback, state)
     else:
         await callback.answer("Сесія не запущена", reply_markup=session_managment)
 

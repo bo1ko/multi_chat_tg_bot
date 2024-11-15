@@ -12,3 +12,5 @@ test.json
 response.txt
 answers_log/*
 channel_log.txt
+contrinue_dialog_response.txt
+dumpfile.sql

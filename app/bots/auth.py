@@ -46,7 +46,7 @@ class TelegramLogin:
                 return
 
             # Check if the proxy is working
-            result = await is_proxy_working(proxy)
+            result = await is_proxy_working(proxy_str)
             if not result:
                 await message.answer(
                     f"Помилка при підключенні до Telegram (Проксі не дає відповідь)", reply_markup=self.account_managment

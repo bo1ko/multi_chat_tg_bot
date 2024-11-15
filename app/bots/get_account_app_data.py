@@ -2,6 +2,8 @@ import asyncio
 import random
 from playwright.async_api import async_playwright
 from app.database.orm_query import orm_add_api
+from app.utils.helpers import is_proxy_working
+from aiogram.types import Message
 
 
 class AuthTgAPI:
@@ -11,7 +13,7 @@ class AuthTgAPI:
         self.page = None
         self.playwright = None
 
-    async def initialize_browser(self, account):
+    async def initialize_browser(self, account, message: Message):
         # Ініціалізуємо playwright і браузер
         self.playwright = await async_playwright().start()
         
@@ -26,11 +28,9 @@ class AuthTgAPI:
                 scheme = proxy_str.split("://")[0]
                 parsed_proxy = proxy_str.split("://")[1].split(":")
                 proxy = {
-                    "hostname": parsed_proxy[1].split("@")[1],
-                    "port": int(parsed_proxy[2]),
+                    "server": f"{scheme}://{parsed_proxy[1].split('@')[1]}:{parsed_proxy[2]}",
                     "username": parsed_proxy[0],
-                    "password": parsed_proxy[1].split("@")[0],
-                    "scheme": scheme,
+                    "password": parsed_proxy[1].split('@')[0]
                 }
             except Exception as e:
                 await message.answer(
@@ -40,7 +40,7 @@ class AuthTgAPI:
                 return
 
             # Check if the proxy is working
-            result = await is_proxy_working(proxy)
+            result = await is_proxy_working(proxy_str)
             if not result:
                 await message.answer(
                     f"Помилка при підключенні до Telegram (Проксі не дає відповідь)", reply_markup=self.account_managment
@@ -70,7 +70,7 @@ class AuthTgAPI:
         try:
             # Перевіряємо чи браузер ініціалізовано
             if not self.browser or not self.page:
-                await self.initialize_browser(account)
+                await self.initialize_browser(account, message)
 
             # Переходимо на сторінку авторизації
             await self.page.goto("https://my.telegram.org/auth")

@@ -15,7 +15,7 @@ from aiogram.fsm.context import FSMContext
 
 from app.database.orm_query import (
     orm_add_dialog,
-    orm_get_free_accounts,
+    orm_update_session,
     orm_get_session,
 )
 from app.keyboards.inline import get_callback_btns
@@ -89,10 +89,12 @@ async def generate_dialogs(prompt_text, message: Message, back_session_managment
 
 
 async def continue_dialog(prompt_text, last_dialog, session_id, message: Message):
-    prompt_text += f"Based on the prompt above and this dialog, continue the dialog for another 10 messages"
+    session = await orm_get_session(session_id)
+    prompt_text += f"Prompt: {session.prompt}\n\n"
+    prompt_text += f"Based on the prompt above and this dialog, continue the dialog for another 2 messages"
     prompt_text += f"\n\nLast dialog: {last_dialog}"
     prompt_text += """\n\n
-    The answer must be in format like this, id values must start from 0:
+    The answer must be in format like this, id values must start from 0. THIS IS JUST AN EXAMPLE OF RESPONSE:
     [{"message_id":"0", "user_id": "0", "message": "some text"}, {"message_id":"1", "user_id": "1", "message": "some text"}]
     """
 
@@ -124,9 +126,14 @@ async def continue_dialog(prompt_text, last_dialog, session_id, message: Message
         await message.answer("Продовження ділогу")
         await message.answer_document(file)
 
-        await orm_
+        await orm_update_session(session_id, data=str(generated_json[0]))
 
-        await roles_distribution(session_id, accounts, str(generated_json[0]))
+        result_status, result_text = await roles_distribution(session_id)
+
+        if result_status:
+            await message.answer(f"Результат: {result_text}")
+        else:
+            await message.answer(f"Результат {result_text}\nВсі діалоги зупинені")
 
     except openai.OpenAIError as e:
         logging.error(f"Сталася помилка при отриманні відповіді: {e}")
@@ -218,23 +225,19 @@ def extract_json_from_text(text):
     return json_objects
 
 
-async def roles_distribution(session_id, accounts, data):
+async def roles_distribution(session_id):
     try:
-        data_json = ast.literal_eval(data)
-
-        unique_users = {int(message["user_id"]) for message in data_json}
-        print(unique_users)
-        print(len(unique_users), len(accounts))
-        if len(accounts) < len(unique_users):
-            return False, "Недостатньо вільних аккаунтів"
-        elif len(accounts) > len(unique_users):
-            accounts = accounts[: len(unique_users)]
+        session = await orm_get_session(session_id)
+        account_list = session.accounts
+        data_json = ast.literal_eval(session.data)
 
         result_count = 0
         for message in data_json:
+            account_id = int(account_list[int(message["user_id"])])
+
             add_result = await orm_add_dialog(
                 session_id,
-                accounts[int(message["user_id"])].id,
+                account_id,
                 int(message["message_id"]),
                 message["message"],
             )
@@ -277,7 +280,7 @@ def clear_unique_message(number):
 
 
 async def is_proxy_working(proxy_url):
-    full_proxy_url = f"http://{proxy_url['username']}:{proxy_url['password']}@{proxy_url['hostname']}:{proxy_url['port']}"
+    full_proxy_url = proxy_url
 
     proxies = {"http://": full_proxy_url, "https://": full_proxy_url}
 
@@ -289,7 +292,7 @@ async def is_proxy_working(proxy_url):
             response = await client.get("https://api.ipify.org")
 
             if response.status_code == 200:
-                logging.warning("Proxy is working. IP:", response.text)
+                logging.warning(f"Proxy is working. IP: {response.text}")
                 return True
             else:
                 logging.warning(f"Proxy returned status code: {response.status_code}")
