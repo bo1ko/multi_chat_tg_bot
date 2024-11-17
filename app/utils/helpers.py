@@ -54,7 +54,7 @@ async def generate_dialogs(prompt_text, message: Message, back_session_managment
                 {"role": "user", "content": prompt_text},
             ],
             max_tokens=16384,
-            temperature=0.7,
+            temperature=0,
         )
         generated_text = completion.choices[0].message.content
         generated_json = extract_json_from_text(generated_text)
@@ -88,7 +88,9 @@ async def generate_dialogs(prompt_text, message: Message, back_session_managment
         )
 
 
-async def continue_dialog(prompt_text, last_dialog, session_id, user_ids, message: Message):
+async def continue_dialog(
+    prompt_text, last_dialog, session_id, user_ids, message: Message
+):
     session = await orm_get_session(session_id)
     prompt_text += f"Prompt: {session.prompt}\n\n"
     prompt_text += f"User IDs: {user_ids}\n\n"
@@ -110,7 +112,7 @@ async def continue_dialog(prompt_text, last_dialog, session_id, user_ids, messag
                 {"role": "user", "content": prompt_text},
             ],
             max_tokens=16384,
-            temperature=0.7,
+            temperature=0,
         )
         generated_text = completion.choices[0].message.content
         generated_json = extract_json_from_text(generated_text)
@@ -174,7 +176,7 @@ async def generate_answer_for_user(
                     {"role": "user", "content": prompt_text},
                 ],
                 max_tokens=16384,
-                temperature=0.7,
+                temperature=1,
             )
             generated_text = completion.choices[0].message.content
             json_match = re.search(r"\{.*?\}", generated_text)
@@ -306,3 +308,31 @@ async def is_proxy_working(proxy_url):
 
     logging.warning("Proxy is not working.")
     return False
+
+
+def talk_with_gpt(new_message, all_messages):
+    try:
+        client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+        if not all_messages:
+            all_messages = [
+                {"role": "system", "content": [{"type": "text", "text": "You are a helpful assistant."}]},
+                {"role": "user", "content": [{"type": "text", "text": new_message}]},
+            ]
+        else:
+            all_messages.append(
+                {"role": "user", "content": [{"type": "text", "text": new_message}]}
+            )
+
+        completion = client.chat.completions.create(
+            model="gpt-3.5-turbo", messages=all_messages, temperature=1, timeout=30000
+        )
+        
+
+        generated_text = completion.choices[0].message.content
+
+        return generated_text
+
+    except openai.OpenAIError as e:
+        logging.error(traceback.format_exc())
+        return "Сталася помилка при отриманні відповіді"

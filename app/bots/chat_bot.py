@@ -135,9 +135,7 @@ class ChatJoiner:
                                 }
                             except Exception as e:
                                 await self.message.answer(
-                                    f"Невалідний проксі {account.proxy} для номера {account.number}",
-                                    reply_markup=self.account_managment,
-                                )
+                                    f"Невалідний проксі {account.proxy} для номера {account.number}")
                                 return
                         else:
                             proxy = account.proxy
@@ -242,6 +240,7 @@ class ChatJoiner:
                                     UsernameNotOccupied,
                                 ) as e:
                                     logging.error(f"Error: {e}\n\n{chat_url}")
+                                    logging.error(f"Traceback: {traceback.format_exc()}")
 
                                     if isinstance(e, ChannelPrivate):
                                         # Якщо канал або група приватні, робимо запит для доступу
@@ -328,3 +327,4 @@ class ChatJoiner:
             logging.info(f"Запит на запрошення на канал {chat_url} був надісланий.")
         except Exception as e:
             logging.error(f"Не вдалося надіслати запит на канал {chat_url}: {e}")
+            

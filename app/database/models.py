@@ -84,3 +84,13 @@ class Dialog(Base):
     )
     message_id: Mapped[int] = mapped_column(Integer, nullable=True)
     message: Mapped[str] = mapped_column(Text, nullable=True)
+
+
+class GPTSession(Base):
+    __tablename__ = "gpt_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True
+    )
+    messages: Mapped[list] = mapped_column(MutableList.as_mutable(ARRAY(String)), nullable=True)

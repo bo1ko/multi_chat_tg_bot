@@ -19,7 +19,7 @@ from app.keyboards.inline import get_callback_btns
 
 from app.filters.check_admin import IsAdmin
 from app.bots.get_account_app_data import AuthTgAPI
-from app.utils.helpers import clear_folder, generate_dialogs, roles_distribution
+from app.utils.helpers import clear_folder, generate_dialogs, roles_distribution, talk_with_gpt
 from app.utils.account_manager import xlsx_accounts_parser
 
 load_dotenv()
@@ -501,7 +501,7 @@ auth_task = None
 
 # telegram auth
 @router.message(ACCOUNT_MANAGMENT_KB_NAMES["telegram_auth_proccess"] == F.text)
-async def api_auth(message: Message, state: FSMContext):
+async def api_auth_tg(message: Message, state: FSMContext):
     await state.clear()
     await message.answer(
         "Виберіть номер для авторизації", reply_markup=back_account_managment
@@ -551,6 +551,10 @@ async def code_handler(message: types.Message, state: FSMContext):
         await state.clear()
     else:
         await message.answer("Будь ласка, введи коректний код підтвердження.")
+    
+    await api_auth_tg(message, state)
+    
+    
 
 
 # ---------- API AUTH ----------
@@ -610,6 +614,7 @@ async def code_handler(message: types.Message, state: FSMContext):
 # ---------- SESSION ----------
 # session panel
 SESSION_MANAGMENT_KB_NAMES = {
+    "create_dialog": "Створити діалог 🦜",
     "add_session": "Добавити сесію 💻",
     "remove_session": "Видалити сесію 🗑️",
     "session_list": "Список сесій 📕",
@@ -619,11 +624,12 @@ SESSION_MANAGMENT_KB_NAMES = {
 }
 session_managment = get_keyboard(
     SESSION_MANAGMENT_KB_NAMES["session_list"],
+    SESSION_MANAGMENT_KB_NAMES["create_dialog"],
     SESSION_MANAGMENT_KB_NAMES["add_session"],
     SESSION_MANAGMENT_KB_NAMES["remove_session"],
     SESSION_MANAGMENT_KB_NAMES["additional instructions"],
     BACK_TO_MENU["back_to_menu"],
-    sizes=(1, 2, 1, 1),
+    sizes=(1, 1, 2, 1),
 )
 back_session_managment = get_keyboard(
     SESSION_MANAGMENT_KB_NAMES["back_session_managment"],
@@ -685,7 +691,6 @@ async def add_session_first(message: Message, state: FSMContext):
 async def back_step_handler(message: types.Message, state: FSMContext):
 
     current_state = await state.get_state()
-    print("!" * 10, current_state)
     if current_state == SessionState.session_type:
         await message.answer(
             "Попередній крок відсутній, або введіть назву сесії, або вийдіть в меню"
@@ -706,7 +711,11 @@ async def back_step_handler(message: types.Message, state: FSMContext):
 @router.message(SessionState.session_type, F.text)
 async def add_session_second(message: Message, state: FSMContext, back=False):
     if not back:
+        user = await rq.orm_get_user(message.from_user.id)
+
         await state.update_data(session_type=message.text)
+        await rq.orm_create_gpt_session(user.id, message.text)
+    
     await message.answer("Введіть промпт 👇", reply_markup=back_from_add_session)
     await state.set_state(SessionState.prompt)
 
@@ -722,6 +731,8 @@ async def add_session_third(message: Message, state: FSMContext):
 
     await state.update_data(prompt=prompt)
 
+    
+
     result = await generate_dialogs(prompt, message, back_from_add_session)
 
     if not result:
@@ -736,7 +747,7 @@ async def add_session_third(message: Message, state: FSMContext):
 
 @router.message(SessionState.prompt)
 async def add_session_fifth_wrong(message: types.Message):
-    await message.answer("Ви ввели недопустимі дані, введіть провіжок часу знову")
+    await message.answer("Ви ввели недопустимі дані, промпт знову")
 
 
 @router.callback_query(F.data == "use_dialog")
@@ -852,7 +863,7 @@ async def add_session_fifth(message: Message, state: FSMContext):
 
 @router.message(SessionState.answer_time)
 async def add_session_fifth_wrong(message: types.Message):
-    await message.answer("Ви ввели недопустимі дані, введіть провіжок часу знову")
+    await message.answer("Ви ввели недопустимі дані, введіть проміжок часу знову")
 
 
 @router.message(SessionState.get_free_accounts)
@@ -1154,3 +1165,42 @@ async def remove_session(callback: CallbackQuery, state: FSMContext):
 async def cmd_test(message: Message):
     chat_bot = ChatJoiner(message, admin_menu)
     await chat_bot.start_chatting(4)
+
+
+
+class GPTSessionState(StatesGroup):
+    gpt_session_id = State()
+    user_message = State()
+
+
+@router.message(SESSION_MANAGMENT_KB_NAMES["create_dialog"] == F.text)
+async def create_dialog(message: Message, state: FSMContext, gpt_back=False):
+    if not gpt_back:
+        user = await rq.orm_get_user(message.from_user.id)
+        gpt_session = await rq.orm_create_gpt_session(user.id)
+        
+        await message.answer('Діалог з GPT створено. Введіть промпт', reply_markup=back_session_managment)
+        await state.update_data(gpt_session_id=gpt_session.id)
+
+    await state.set_state(GPTSessionState.user_message)
+
+@router.message(GPTSessionState.user_message)
+async def dialog_with_gpt(message: Message, state: FSMContext):
+    user_message = message.text
+    old_messages = await rq.orm_get_gpt_session(await state.get_value("gpt_session_id"))
+    print(old_messages)
+    response = talk_with_gpt(user_message, old_messages)
+    
+    if len(response) > 4000:
+        parts = [response[i:i + 4000] for i in range(0, len(response), 4000)]
+        
+        for part in parts:
+            await message.answer(part)
+    else:
+        await message.answer(response)
+    
+    gpt_session_id = int(await state.get_value("gpt_session_id"))
+    
+    await rq.orm_add_gpt_message(gpt_session_id, user_message, response)
+    await create_dialog(message, state, gpt_back=True)
+    
