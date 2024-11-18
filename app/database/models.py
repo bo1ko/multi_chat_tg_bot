@@ -49,9 +49,14 @@ class Session(Base):
     answer_time: Mapped[str] = mapped_column(Text, nullable=True)
     is_dialog_created: Mapped[bool] = mapped_column(Boolean, default=False)
     instructions: Mapped[str] = mapped_column(Text, nullable=True)
-    prompt: Mapped[str] = mapped_column(Text, nullable=True)
-    
-    accounts: Mapped[list] = mapped_column(MutableList.as_mutable(ARRAY(String)), nullable=True)
+
+    prompt_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("gpt_sessions.id", ondelete="CASCADE"), nullable=True
+    )
+
+    accounts: Mapped[list] = mapped_column(
+        MutableList.as_mutable(ARRAY(String)), nullable=True
+    )
 
 
 class Account(Base):
@@ -69,7 +74,6 @@ class Account(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=False)
     proxy: Mapped[str] = mapped_column(Text, nullable=True)
     two_auth_code: Mapped[str] = mapped_column(Text, nullable=True)
-
 
 
 class Dialog(Base):
@@ -93,4 +97,6 @@ class GPTSession(Base):
     user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True
     )
-    messages: Mapped[list] = mapped_column(MutableList.as_mutable(ARRAY(String)), nullable=True)
+    messages: Mapped[list] = mapped_column(
+        MutableList.as_mutable(ARRAY(String)), nullable=True
+    )

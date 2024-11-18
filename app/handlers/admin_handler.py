@@ -1,7 +1,11 @@
 import ast
 import asyncio
+import logging
+import json
 import os
 
+from datetime import datetime
+import traceback
 from aiogram import Router, types, F, Bot
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command, or_f, StateFilter
@@ -19,10 +23,19 @@ from app.keyboards.inline import get_callback_btns
 
 from app.filters.check_admin import IsAdmin
 from app.bots.get_account_app_data import AuthTgAPI
-from app.utils.helpers import clear_folder, generate_dialogs, roles_distribution, talk_with_gpt
+from app.utils.helpers import (
+    clear_folder,
+    convert_answer_to_json,
+    extract_json_from_text,
+    generate_dialogs,
+    roles_distribution,
+    talk_with_gpt,
+)
 from app.utils.account_manager import xlsx_accounts_parser
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 router.message.filter(IsAdmin())
@@ -551,10 +564,8 @@ async def code_handler(message: types.Message, state: FSMContext):
         await state.clear()
     else:
         await message.answer("Будь ласка, введи коректний код підтвердження.")
-    
+
     await api_auth_tg(message, state)
-    
-    
 
 
 # ---------- API AUTH ----------
@@ -570,46 +581,52 @@ api_auth_task = None
 # api auth panel
 @router.message(ACCOUNT_MANAGMENT_KB_NAMES["api_auth_proccess"] == F.text)
 async def api_auth(message: Message):
-    await message.answer('Виберіть номер для авторизації', reply_markup=back_account_managment)
+    await message.answer(
+        "Виберіть номер для авторизації", reply_markup=back_account_managment
+    )
     accounts = await rq.orm_get_authorized_accounts()
-    
+
     if accounts:
         btns = {}
         for account in accounts:
-            btns[f'{account.number}'] = f'start_api_auth_tg_{account.id}'
-        
-        await message.answer(f'Номера 📱', reply_markup=get_callback_btns(btns=btns, sizes=(1,)))
-    else:
-        await message.answer('Немає номерів', reply_markup=account_managment)
+            btns[f"{account.number}"] = f"start_api_auth_tg_{account.id}"
 
-@router.callback_query(F.data.startswith('start_api_auth_tg_'))
+        await message.answer(
+            f"Номера 📱", reply_markup=get_callback_btns(btns=btns, sizes=(1,))
+        )
+    else:
+        await message.answer("Немає номерів", reply_markup=account_managment)
+
+
+@router.callback_query(F.data.startswith("start_api_auth_tg_"))
 async def api_auth_second(callback: types.CallbackQuery, state: FSMContext):
     global api_auth_task, api_login_manager
     account_id = int(callback.data.split("_")[-1])
-    
-    
+
     if api_auth_task and not api_auth_task.done():
         api_auth_task.cancel()
 
     await callback.message.edit_text("Розпочинаю Telegram API авторизацію...")
-    
+
     account = await rq.orm_get_account_by_id(account_id)
 
     api_login_manager = AuthTgAPI(account_managment)
     api_auth_task = await api_login_manager.start_login(callback.message, account)
-    
+
     await state.set_state(APIAuth.code)
+
 
 @router.message(APIAuth.code)
 async def code_handler(message: types.Message, state: FSMContext):
     global api_login_manager
 
     code_text = message.text
-    print('!' * 10, code_text)
-    
+    print("!" * 10, code_text)
+
     await api_login_manager.second_step(message, code_text)
     await state.clear()
     await api_auth(message)
+
 
 # ---------- SESSION ----------
 # session panel
@@ -648,7 +665,6 @@ chat_bot_task = None
 
 class SessionState(StatesGroup):
     session_type = State()
-    prompt = State()
     account_count = State()
     chat_url = State()
     answer_time = State()
@@ -661,7 +677,6 @@ class SessionState(StatesGroup):
 
     texts = {
         "SessionState:session_type": "Введіть тип сесії заново:",
-        "SessionState:prompt": "Введіть промпт заново:",
         "SessionState:chat_url": "Введіть посилання на чат заново:",
         "SessionState:answer_time": "Введіть проміжок часу між відповідями користувачів заново:",
     }
@@ -681,8 +696,12 @@ async def session_panel(message: Message, state: FSMContext):
 
 # add session
 @router.message(StateFilter(None), SESSION_MANAGMENT_KB_NAMES["add_session"] == F.text)
-async def add_session_first(message: Message, state: FSMContext):
-    await state.clear()
+async def add_session_first(
+    message: Message, state: FSMContext, continue_session=False
+):
+    if not continue_session:
+        await state.clear()
+
     await message.answer("Введіть назву сесії 👇", reply_markup=back_from_add_session)
     await state.set_state(SessionState.session_type)
 
@@ -708,65 +727,25 @@ async def back_step_handler(message: types.Message, state: FSMContext):
         previous = step
 
 
+
+
 @router.message(SessionState.session_type, F.text)
 async def add_session_second(message: Message, state: FSMContext, back=False):
     if not back:
-        user = await rq.orm_get_user(message.from_user.id)
-
         await state.update_data(session_type=message.text)
-        await rq.orm_create_gpt_session(user.id, message.text)
-    
-    await message.answer("Введіть промпт 👇", reply_markup=back_from_add_session)
-    await state.set_state(SessionState.prompt)
+        await message.answer(
+            "Згенерований діалог збережено до сесії", reply_markup=back_from_add_session
+        )
 
+    await message.answer(
+        "Введіть посилання на чат 👇", reply_markup=back_from_add_session
+    )
+    await state.set_state(SessionState.chat_url)
 
 @router.message(SessionState.session_type)
 async def add_session_fifth_wrong(message: types.Message):
     await message.answer("Ви ввели недопустимі дані, введіть назву знову")
 
-
-@router.message(SessionState.prompt, F.text)
-async def add_session_third(message: Message, state: FSMContext):
-    prompt = message.text
-
-    await state.update_data(prompt=prompt)
-
-    
-
-    result = await generate_dialogs(prompt, message, back_from_add_session)
-
-    if not result:
-        await message.answer(
-            "Помилка при отриманні JSON з відповіді GPT. Спробуйте ще раз згенерувати діалог.\n\nВведіть промпт 👇",
-            reply_markup=back_from_add_session,
-        )
-        return
-
-    await state.update_data(data_json=result)
-
-
-@router.message(SessionState.prompt)
-async def add_session_fifth_wrong(message: types.Message):
-    await message.answer("Ви ввели недопустимі дані, промпт знову")
-
-
-@router.callback_query(F.data == "use_dialog")
-async def use_dialog(callback: CallbackQuery, state: FSMContext):
-    await callback.answer()
-    await callback.message.edit_text("Діалог підтверджено")
-
-    await callback.message.answer(
-        "Введіть посилання на чат 👇", reply_markup=back_from_add_session
-    )
-
-    await state.set_state(SessionState.chat_url)
-
-
-@router.callback_query(F.data == "dont_use_dialog")
-async def dont_use_dialog(callback: CallbackQuery, state: FSMContext):
-    await callback.answer()
-    await callback.message.edit_text("Діалог скасовано")
-    await add_session_second(callback.message, state, back=True)
 
 
 @router.message(SessionState.chat_url, F.text)
@@ -789,74 +768,80 @@ async def add_session_fourth(message: Message, state: FSMContext):
         )
         return
 
-
 @router.message(SessionState.chat_url)
 async def add_session_fifth_wrong(message: types.Message):
     await message.answer("Ви ввели недопустимі дані, введіть юрл чату знову")
 
-
 @router.message(SessionState.answer_time, F.text)
 async def add_session_fifth(message: Message, state: FSMContext):
-    answer_time = message.text.split("-")
+    try:
+        answer_time = message.text.split("-")
 
-    if len(answer_time) != 2:
-        await message.answer(
-            "Введіть правильний проміжок часу між відповідями користувачів",
-            reply_markup=back_from_add_session,
-        )
-        return
-
-    print("!" * 10, int(answer_time[0]) <= int(answer_time[1]))
-    if int(answer_time[0]) >= int(answer_time[1]):
-        await message.answer(
-            "Введіть правильний проміжок часу між відповідями користувачів",
-            reply_markup=back_from_add_session,
-        )
-        return
-
-    await state.update_data(answer_time=message.text)
-
-    data = await state.get_data()
-
-    session_type = data.get("session_type")
-    data_json = data.get("data_json")
-    chat_url = data.get("chat_url")
-    prompt = data.get("prompt")
-
-    add_session = await rq.orm_add_session(
-        session_type, data_json, chat_url, message.text, prompt
-    )
-
-    if add_session:
-        await message.answer("Сесія збережена!")
-        await message.answer(
-            f"Назва: {session_type}\nЮрл чату: {chat_url}\nСередній час відповіді: {message.text}",
-            reply_markup=session_managment,
-        )
-
-        await message.answer(
-            "Пошук аккаунтів для сесії...", reply_markup=session_managment
-        )
-
-        accounts = await rq.orm_get_free_accounts()
-
-        data_list = ast.literal_eval(data_json)
-        user_ids = {message["user_id"] for message in data_list}
-        unique_users_count = len(user_ids)
-
-        if unique_users_count > len(accounts):
+        if len(answer_time) != 2:
             await message.answer(
-                "Недостатньо аккаунтів для розприділення ролів",
+                "Введіть правильний проміжок часу між відповідями користувачів",
+                reply_markup=back_from_add_session,
+            )
+            return
+
+        print("!" * 10, int(answer_time[0]) <= int(answer_time[1]))
+        if int(answer_time[0]) >= int(answer_time[1]):
+            await message.answer(
+                "Введіть правильний проміжок часу між відповідями користувачів",
+                reply_markup=back_from_add_session,
+            )
+            return
+
+        await state.update_data(answer_time=message.text)
+
+        data = await state.get_data()
+
+        session_type = data.get("session_type")
+        data_json = data.get("dialog_result_json")
+        chat_url = data.get("chat_url")
+        prompt_id = data.get("gpt_session_id")
+
+        data_list = extract_json_from_text(data_json)
+        
+        add_session = await rq.orm_add_session(
+            session_type, json.dumps(data_list, ensure_ascii=False, indent=4), chat_url, message.text, prompt_id=int(prompt_id)
+        )
+
+        if add_session:
+            await message.answer("Сесія збережена!")
+            await message.answer(
+                f"Назва: {session_type}\nЮрл чату: {chat_url}\nСередній час відповіді: {message.text}",
                 reply_markup=session_managment,
             )
-            await state.clear()
-            return
-        else:
-            await state.set_data(
-                {"session_id": add_session.id, "unique_users_count": unique_users_count}
+
+            await message.answer(
+                "Пошук аккаунтів для сесії...", reply_markup=session_managment
             )
-            await add_session_sixth(message, state)
-    else:
+
+            accounts = await rq.orm_get_free_accounts()
+
+            user_ids = {message["user_id"] for message in data_list}
+            unique_users_count = len(user_ids)
+
+            if unique_users_count > len(accounts):
+                await message.answer(
+                    "Недостатньо аккаунтів для розприділення ролів",
+                    reply_markup=session_managment,
+                )
+                await state.clear()
+                return
+            else:
+                await state.set_data(
+                    {"session_id": add_session.id, "unique_users_count": unique_users_count}
+                )
+                await add_session_sixth(message, state)
+        else:
+            await message.answer("Щось пішло не так.. Спробуйте знову!")
+            await state.clear()
+    except Exception as e:
+        print(e)
+        logging.error(e)
+        logging.error(traceback.format_exc())
         await message.answer("Щось пішло не так.. Спробуйте знову!")
         await state.clear()
 
@@ -888,9 +873,9 @@ async def add_session_sixth(message: Message, state: FSMContext):
             reply_markup=session_managment,
         )
 
-        await message.answer('Починаю розприділяти діалоги по аккаунтам')
+        await message.answer("Починаю розприділяти діалоги по аккаунтам")
         result_status, result_text = await roles_distribution(session.id)
-        
+
         if result_status:
             await message.answer(
                 f"Результат: {result_text}", reply_markup=session_managment
@@ -1167,6 +1152,8 @@ async def cmd_test(message: Message):
     await chat_bot.start_chatting(4)
 
 
+# GPT SESSION
+
 
 class GPTSessionState(StatesGroup):
     gpt_session_id = State()
@@ -1179,28 +1166,75 @@ async def create_dialog(message: Message, state: FSMContext, gpt_back=False):
         user = await rq.orm_get_user(message.from_user.id)
         gpt_session = await rq.orm_create_gpt_session(user.id)
         
-        await message.answer('Діалог з GPT створено. Введіть промпт', reply_markup=back_session_managment)
+        await message.answer(
+            "Діалог з GPT створено. Введіть промпт", reply_markup=back_session_managment
+        )
         await state.update_data(gpt_session_id=gpt_session.id)
 
     await state.set_state(GPTSessionState.user_message)
+
 
 @router.message(GPTSessionState.user_message)
 async def dialog_with_gpt(message: Message, state: FSMContext):
     user_message = message.text
     old_messages = await rq.orm_get_gpt_session(await state.get_value("gpt_session_id"))
-    print(old_messages)
     response = talk_with_gpt(user_message, old_messages)
-    
+
     if len(response) > 4000:
-        parts = [response[i:i + 4000] for i in range(0, len(response), 4000)]
-        
-        for part in parts:
-            await message.answer(part)
+        parts = [response[i : i + 4000] for i in range(0, len(response), 4000)]
+
+        for count, part in enumerate(parts):
+            print(part, len(parts))
+            if count == len(parts):
+                await message.answer(
+                    part,
+                    reply_markup=get_callback_btns(
+                        btns={"Перетворити в JSON": "convert_to_json"}
+                    ),
+                )
+            else:
+                await message.answer(part)
     else:
-        await message.answer(response)
-    
+        await message.answer(
+            response,
+            reply_markup=get_callback_btns(
+                btns={"Перетворити в JSON": f"convert_to_json"}
+            ),
+        )
+
     gpt_session_id = int(await state.get_value("gpt_session_id"))
-    
+
     await rq.orm_add_gpt_message(gpt_session_id, user_message, response)
     await create_dialog(message, state, gpt_back=True)
-    
+
+
+@router.callback_query(F.data == "convert_to_json")
+async def convert_to_json(callback: CallbackQuery, state: FSMContext):
+    await callback.answer("Отримую дані...")
+
+    result = convert_answer_to_json(callback.message.text)
+    current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    file_path = f"response_{current_time}.txt"
+    with open(file_path, "w", encoding="utf-8") as file:
+        file.write(str(result))
+
+    await state.update_data(dialog_result_json=result)
+
+    file = types.FSInputFile(file_path, filename=f"dialogs_{current_time}.txt")
+    await callback.message.answer_document(
+        file,
+        reply_markup=get_callback_btns(
+            btns={"Створити сесію": "gpt_create_dialog_to_session"}
+        ),
+    )
+
+    if os.path.exists(file_path):
+        os.remove(file_path)
+
+    await create_dialog(callback.message, state, gpt_back=True)
+
+
+@router.callback_query(F.data == "gpt_create_dialog_to_session")
+async def gpt_add_dialog_to_session(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await add_session_first(callback.message, state, continue_session=True)

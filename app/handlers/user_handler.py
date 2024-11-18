@@ -1,6 +1,7 @@
 from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import CommandStart
+from aiogram.fsm.context import FSMContext
 from dotenv import load_dotenv
 
 from app.database.orm_query import orm_get_user, orm_add_user
@@ -14,7 +15,9 @@ router = Router()
 
 #  /start
 @router.message(CommandStart())
-async def cmd_start(message: Message):
+async def cmd_start(message: Message, state: FSMContext):
+    await state.clear()
+
     user = await orm_get_user(value=message.from_user.id, get_by="id")
 
     if not user:

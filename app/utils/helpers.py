@@ -225,7 +225,7 @@ def extract_json_from_text(text):
         except json.JSONDecodeError:
             continue
 
-    return json_objects
+    return json_objects[0]
 
 
 async def roles_distribution(session_id):
@@ -233,11 +233,15 @@ async def roles_distribution(session_id):
         session = await orm_get_session(session_id)
         account_list = session.accounts
         data_json = ast.literal_eval(session.data)
+        user_ids = [item["user_id"] for item in data_json]
 
         result_count = 0
         for message in data_json:
-            account_id = int(account_list[int(message["user_id"])])
-
+            if user_ids[0] == '1':
+                account_id = int(account_list[int(message["user_id"])-1])
+            else:
+                account_id = int(account_list[int(message["user_id"])])
+                
             add_result = await orm_add_dialog(
                 session_id,
                 account_id,
@@ -254,9 +258,8 @@ async def roles_distribution(session_id):
             return False, "Щось пішло не так"
     except Exception as e:
         print(e)
-        traceback.format_exc()
-        print(traceback.format_exc())
-        return False, f"Щось пішло не так\n{e}\n{traceback.format_exc()}"
+        logging.error(traceback.format_exc())
+        return False, f"Щось пішло не так"
 
 
 # random number generator beetwen first and last number
@@ -316,7 +319,12 @@ def talk_with_gpt(new_message, all_messages):
 
         if not all_messages:
             all_messages = [
-                {"role": "system", "content": [{"type": "text", "text": "You are a helpful assistant."}]},
+                {
+                    "role": "system",
+                    "content": [
+                        {"type": "text", "text": "You are a helpful assistant."}
+                    ],
+                },
                 {"role": "user", "content": [{"type": "text", "text": new_message}]},
             ]
         else:
@@ -325,9 +333,45 @@ def talk_with_gpt(new_message, all_messages):
             )
 
         completion = client.chat.completions.create(
-            model="gpt-3.5-turbo", messages=all_messages, temperature=1, timeout=30000
+            model="gpt-4o", messages=all_messages, temperature=1, timeout=30000
         )
-        
+
+        generated_text = completion.choices[0].message.content
+
+        return generated_text
+
+    except openai.OpenAIError as e:
+        logging.error(traceback.format_exc())
+        return "Сталася помилка при отриманні відповіді"
+
+
+def convert_answer_to_json(text):
+    try:
+        client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+
+        completion = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {
+                    "role": "system",
+                    "content": [
+                        {"type": "text", "text": """
+                        You extract dialogs from the message in JSON data in the following format:
+                        [{"message_id":"0", "user_id": "0", "message": "text"}, {"message_id":"1", "user_id": "1", "message": "text"}]
+                        """}
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": text}
+                    ]
+                },
+                ],
+            temperature=0,
+            timeout=30000,
+        )
 
         generated_text = completion.choices[0].message.content
 

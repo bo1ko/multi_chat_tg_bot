@@ -409,8 +409,8 @@ async def orm_add_session(
     data_json: str,
     chat_url: str,
     answer_time: str,
-    prompt: str,
     accounts=None,
+    prompt_id=None,
 ):
     async with session_maker() as session:
         async with session.begin():
@@ -420,8 +420,8 @@ async def orm_add_session(
                     data=data_json,
                     answer_time=answer_time,
                     chat_url=chat_url,
-                    prompt=prompt,
                     accounts=accounts,
+                    prompt_id=prompt_id,
                 )
                 session.add(obj)
                 await session.commit()
