@@ -15,6 +15,7 @@ from aiogram.fsm.context import FSMContext
 
 from app.database.orm_query import (
     orm_add_dialog,
+    orm_remove_all_dialogs_by_session,
     orm_update_session,
     orm_get_session,
 )
@@ -35,85 +36,54 @@ def clear_folder(folder_path):
                     os.rmdir(file_path)
 
 
-async def generate_dialogs(prompt_text, message: Message, back_session_managment):
-    prompt_text += """\n\n
-    The answer must be in format like this, id values must start from 0:
-    [{"message_id":"0", "user_id": "0", "message": "some text"}, {"message_id":"1", "user_id": "1", "message": "some text"}]
-    """
+async def continue_dialog(prompts, last_dialog, session_id, user_ids, message: Message):
+    await orm_remove_all_dialogs_by_session(session_id)
+    all_messages = [
+        {
+            "role": "system",
+            "content": [
+                {
+                    "type": "text",
+                    "text": """
+                        You extract dialogs from the message in JSON data in the following format:
+                        [{"message_id":"0", "user_id": "0", "message": "text"}, {"message_id":"1", "user_id": "1", "message": "text"}]
+                        """,
+                }
+            ],
+        }
+    ]
+    
+    prompt_list = ast.literal_eval(prompts)
 
-    await message.answer("Починаю генерувати відповідь...")
+    for count, prompt in enumerate(prompt_list):
+        if count == len(prompt_list) - 1:
+            text = f"{prompt}\n\n"
+            text += f"Last dialogs: {'\n'.join([i.message for i in last_dialog])}\n\n"
+            text += f"User ids: {user_ids}"
+            text += """
+            You extract dialogs from the message in JSON data in the following format:
+                        [{"message_id":"0", "user_id": "0", "message": "text"}, {"message_id":"1", "user_id": "1", "message": "text"}]
+            """
+
+            all_messages.append(
+                {"role": "user", "content": [{"type": "text", "text": text}]}
+            )
+        else:
+            all_messages.append(
+                {"role": "user", "content": [{"type": "text", "text": prompt}]}
+            )
 
     try:
         client = openai.OpenAI(
             api_key=os.environ.get("OPENAI_API_KEY"),
         )
         completion = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": prompt_text},
-            ],
-            max_tokens=16384,
-            temperature=0,
-        )
-        generated_text = completion.choices[0].message.content
-        generated_json = extract_json_from_text(generated_text)
-
-        if not generated_json:
-            return False
-
-        btns = {"Так": "use_dialog", "Ні": "dont_use_dialog"}
-
-        file_path = "response.txt"
-        with open(file_path, "w", encoding="utf-8") as file:
-            file.write(str(generated_json[0]))
-
-        file = FSInputFile(file_path, filename="dialogs.txt")
-
-        await message.answer(
-            "Ось ваша відповідь в текстовому файлі:",
-            reply_markup=back_session_managment,
-        )
-        await message.answer_document(file)
-        await message.answer(
-            "Використати даний діалог?", reply_markup=get_callback_btns(btns=btns)
+            model="gpt-4o",
+            messages=all_messages,
+            temperature=1,
+            timeout=30000,
         )
 
-        return str(generated_json[0])
-
-    except openai.OpenAIError as e:
-        await message.answer(
-            f"Сталася помилка при отриманні відповіді: {e}",
-            reply_markup=back_session_managment,
-        )
-
-
-async def continue_dialog(
-    prompt_text, last_dialog, session_id, user_ids, message: Message
-):
-    session = await orm_get_session(session_id)
-    prompt_text += f"Prompt: {session.prompt}\n\n"
-    prompt_text += f"User IDs: {user_ids}\n\n"
-    prompt_text += f"Based on the previous dialogues, please continue the conversation for another 50 messages, focusing on specific topics of conversation. Make sure the follow-up addresses current issues, provides relevant advice, and offers a solution or clarification based on shared contexts"
-    prompt_text += f"\n\nLast dialog: {last_dialog}"
-    prompt_text += """\n\n
-    The answer must be in format like this, id values must start from 0. THIS IS JUST AN EXAMPLE OF RESPONSE:
-    [{"message_id":"0", "user_id": "0", "message": "some text"}, {"message_id":"1", "user_id": "1", "message": "some text"}]
-    """
-
-    try:
-        client = openai.OpenAI(
-            api_key=os.environ.get("OPENAI_API_KEY"),
-        )
-        completion = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": prompt_text},
-            ],
-            max_tokens=16384,
-            temperature=0,
-        )
         generated_text = completion.choices[0].message.content
         generated_json = extract_json_from_text(generated_text)
 
@@ -121,15 +91,19 @@ async def continue_dialog(
             return False
 
         file_path = "contrinue_dialog_response.txt"
+        
         with open(file_path, "w", encoding="utf-8") as file:
-            file.write(str(generated_json[0]))
+            pass
+        
+        with open(file_path, "w", encoding="utf-8") as file:
+            file.write(str(generated_json))
 
         file = FSInputFile(file_path, filename="next_dialogs.txt")
 
         await message.answer("Продовження ділогу")
         await message.answer_document(file)
 
-        await orm_update_session(session_id, data=str(generated_json[0]))
+        await orm_update_session(session_id, data=str(generated_json))
 
         result_status, result_text = await roles_distribution(session_id)
 
@@ -224,7 +198,8 @@ def extract_json_from_text(text):
                 return False
         except json.JSONDecodeError:
             continue
-
+    
+    print(json_objects)
     return json_objects[0]
 
 
@@ -237,11 +212,11 @@ async def roles_distribution(session_id):
 
         result_count = 0
         for message in data_json:
-            if user_ids[0] == '1':
-                account_id = int(account_list[int(message["user_id"])-1])
+            if user_ids[0] == "1":
+                account_id = int(account_list[int(message["user_id"]) - 1])
             else:
                 account_id = int(account_list[int(message["user_id"])])
-                
+
             add_result = await orm_add_dialog(
                 session_id,
                 account_id,
@@ -349,26 +324,23 @@ def convert_answer_to_json(text):
     try:
         client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-
         completion = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o",
             messages=[
                 {
                     "role": "system",
                     "content": [
-                        {"type": "text", "text": """
+                        {
+                            "type": "text",
+                            "text": """
                         You extract dialogs from the message in JSON data in the following format:
                         [{"message_id":"0", "user_id": "0", "message": "text"}, {"message_id":"1", "user_id": "1", "message": "text"}]
-                        """}
+                        """,
+                        }
                     ],
                 },
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": text}
-                    ]
-                },
-                ],
+                {"role": "user", "content": [{"type": "text", "text": text}]},
+            ],
             temperature=0,
             timeout=30000,
         )

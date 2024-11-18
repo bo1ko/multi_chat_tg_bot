@@ -1,4 +1,5 @@
-from sqlalchemy import select, delete, update, desc
+import json
+from sqlalchemy import and_, select, delete, update, desc
 from typing import Union
 
 from app.database.engine import engine, session_maker
@@ -183,12 +184,40 @@ async def orm_get_all_accounts():
                 return None
 
 
+# ---------- GET SPECIFIC ACCOUNTS ----------
+async def orm_get_account_by_ids(ids: list[int]):
+    async with session_maker() as session:
+        async with session.begin():
+            try:
+                query = select(Account).where(Account.id.in_(ids))
+                result = await session.execute(query)
+                accounts = result.scalars().all()
+                return accounts
+            except Exception as e:
+                print(e)
+                return None
+
+
 # ---------- GET ALL WITHOUT AUTHORIZED ACCOUNTS ----------
 async def orm_get_all_accounts_without_session():
     async with session_maker() as session:
         async with session.begin():
             try:
                 query = select(Account).where(Account.is_app_created == False)
+                result = await session.execute(query)
+                accounts = result.scalars().all()
+                return accounts
+            except Exception as e:
+                print(e)
+                return None
+
+
+# ---------- GET ALL AUTHORIZED ACCOUNTS ----------
+async def orm_get_all_accounts_authorized():
+    async with session_maker() as session:
+        async with session.begin():
+            try:
+                query = select(Account).where(Account.is_app_created == True)
                 result = await session.execute(query)
                 accounts = result.scalars().all()
                 return accounts
@@ -411,6 +440,7 @@ async def orm_add_session(
     answer_time: str,
     accounts=None,
     prompt_id=None,
+    next_prompt=None,
 ):
     async with session_maker() as session:
         async with session.begin():
@@ -422,6 +452,7 @@ async def orm_add_session(
                     chat_url=chat_url,
                     accounts=accounts,
                     prompt_id=prompt_id,
+                    next_prompt=next_prompt,
                 )
                 session.add(obj)
                 await session.commit()
@@ -500,13 +531,64 @@ async def orm_add_dialog(
                 print(e)
                 return None
 
+# ---------- REMOVE ALL DIALOGS BY SESSION_ID ----------
+async def orm_remove_all_dialogs_by_session(session_id: int):
+    async with session_maker() as session:
+        async with session.begin():
+            try:
+                query = delete(Dialog).where(Dialog.session_id == session_id)
+                await session.execute(query)
+                await session.commit()
+                return True
+            except Exception as e:
+                print(e)
+                return False
+
 
 # ---------- GET DIALOG ----------
 async def orm_get_dialogs(session_id: int):
     async with session_maker() as session:
         async with session.begin():
             try:
-                query = select(Dialog).where(Dialog.session_id == session_id)
+                query = select(Dialog).where(Dialog.session_id == session_id).order_by(Dialog.message_id.asc())
+                result = await session.execute(query)
+                return result.scalars().all()
+            except Exception as e:
+                print(e)
+                return None
+
+
+# ---------- UPDATE ACCOUNT ID FOR DIALOGS BY SESSION ID ----------
+async def orm_update_dialogs_account_id(session_id: int, old_account_id: int, account_id: int):
+    async with session_maker() as session:
+        async with session.begin():
+            try:
+                query = (
+                    update(Dialog)
+                    .where(
+                        Dialog.session_id == session_id,
+                        Dialog.account_id == old_account_id,
+                    )
+                    .values(account_id=account_id)
+                )
+                await session.execute(query)
+                await session.commit()
+                return True
+            except Exception as e:
+                print(e)
+                return False
+
+
+# ---------- GET DIALOG BY SPECIFIC ACCOUNT ID ----------
+async def orm_get_dialogs_by_account_id(session_id: int, account_id: int):
+    async with session_maker() as session:
+        async with session.begin():
+            try:
+                query = select(Dialog).where(
+                    and_(
+                        Dialog.session_id == session_id, Dialog.account_id == account_id
+                    )
+                )
                 result = await session.execute(query)
                 return result.scalars().all()
             except Exception as e:
@@ -528,8 +610,6 @@ async def orm_create_gpt_session(user_id: int):
                 return None
 
 
-import json
-
 async def orm_add_gpt_message(session_id: int, user_message: str, gpt_message: str):
     async with session_maker() as session:
         async with session.begin():
@@ -542,22 +622,24 @@ async def orm_add_gpt_message(session_id: int, user_message: str, gpt_message: s
                     gpt_session.messages = []
 
                 # Serialize user message to JSON string
-                gpt_session.messages.append(json.dumps({
-                    "role": "user",
-                    "content": [{
-                        "type": "text",
-                        "text": user_message
-                    }],
-                }))
+                gpt_session.messages.append(
+                    json.dumps(
+                        {
+                            "role": "user",
+                            "content": [{"type": "text", "text": user_message}],
+                        }
+                    )
+                )
 
                 # Serialize GPT message to JSON string
-                gpt_session.messages.append(json.dumps({
-                    "role": "system",
-                    "content": [{
-                        "type": "text",
-                        "text": gpt_message
-                    }],
-                }))
+                gpt_session.messages.append(
+                    json.dumps(
+                        {
+                            "role": "system",
+                            "content": [{"type": "text", "text": gpt_message}],
+                        }
+                    )
+                )
 
                 # Commit changes to the database
                 await session.commit()
@@ -567,17 +649,12 @@ async def orm_add_gpt_message(session_id: int, user_message: str, gpt_message: s
                 return False
 
 
-import json
-
 # ---------- GET GPT SESSION ----------
 async def orm_get_gpt_session(id: int):
     async with session_maker() as session:
         async with session.begin():
             try:
-                query = (
-                    select(GPTSession)
-                    .where(GPTSession.id == id)
-                )
+                query = select(GPTSession).where(GPTSession.id == id)
                 result = await session.execute(query)
                 gpt_session = result.scalar()
 

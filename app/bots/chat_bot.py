@@ -43,7 +43,6 @@ class ChatJoiner:
         self.admin_menu = admin_menu
         self.phone_number = None
         self.sent_answer = False
-        self.dialog_id = None
 
     async def start_chatting(self, session_id):
         
@@ -78,7 +77,7 @@ class ChatJoiner:
                     return
 
                 dialogs = await orm_get_dialogs(session_id)
-
+                
                 if not dialogs:
                     await self.message.answer(
                         "Не має створених діалогів для цієї сесії",
@@ -93,13 +92,6 @@ class ChatJoiner:
                 print(f'Кількість юзерів: {user_ids}')
                 
                 for count, dialog in enumerate(dialogs):
-                    if self.dialog_id:
-                        if dialog.id < self.dialog_id:
-                            continue
-                    
-                    self.dialog_id = dialog.id
-                    
-                    print(dialog.message_id, dialog.message)
                     try:
                         first, last = session.answer_time.split("-")
                         sleep_time = random_number(int(first), int(last))
@@ -139,11 +131,6 @@ class ChatJoiner:
                                 return
                         else:
                             proxy = account.proxy
-
-                        result = await is_proxy_working(proxy_str)
-                        if not result:
-                            await self.message.answer(
-                                f"Помилка при підключенні до Telegram (Проксі не дає відповідь)")
 
                         await orm_update_account(self.phone_number, is_active=True)
 
@@ -299,9 +286,8 @@ class ChatJoiner:
                 await self.message.answer(
                     "Ділоги закінчились. Генерую нові...", reply_markup=self.admin_menu
                 )
-                await continue_dialog(session.prompt, dialogs[:20], session.id, user_ids, self.message)
+                await continue_dialog(session.next_prompt, dialogs[:100], session.id, user_ids, self.message)
                 await orm_update_session(session_id, is_active=False)
-                self.dialog_id += 1
 
         except Exception as e:
             # Handle general errors

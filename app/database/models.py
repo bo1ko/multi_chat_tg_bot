@@ -53,6 +53,7 @@ class Session(Base):
     prompt_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("gpt_sessions.id", ondelete="CASCADE"), nullable=True
     )
+    next_prompt: Mapped[str] = mapped_column(Text, nullable=True)
 
     accounts: Mapped[list] = mapped_column(
         MutableList.as_mutable(ARRAY(String)), nullable=True

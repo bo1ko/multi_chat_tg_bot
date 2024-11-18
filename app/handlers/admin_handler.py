@@ -27,7 +27,6 @@ from app.utils.helpers import (
     clear_folder,
     convert_answer_to_json,
     extract_json_from_text,
-    generate_dialogs,
     roles_distribution,
     talk_with_gpt,
 )
@@ -631,7 +630,6 @@ async def code_handler(message: types.Message, state: FSMContext):
 # ---------- SESSION ----------
 # session panel
 SESSION_MANAGMENT_KB_NAMES = {
-    "create_dialog": "Створити діалог 🦜",
     "add_session": "Добавити сесію 💻",
     "remove_session": "Видалити сесію 🗑️",
     "session_list": "Список сесій 📕",
@@ -641,12 +639,11 @@ SESSION_MANAGMENT_KB_NAMES = {
 }
 session_managment = get_keyboard(
     SESSION_MANAGMENT_KB_NAMES["session_list"],
-    SESSION_MANAGMENT_KB_NAMES["create_dialog"],
     SESSION_MANAGMENT_KB_NAMES["add_session"],
     SESSION_MANAGMENT_KB_NAMES["remove_session"],
     SESSION_MANAGMENT_KB_NAMES["additional instructions"],
     BACK_TO_MENU["back_to_menu"],
-    sizes=(1, 1, 2, 1),
+    sizes=(1, 2, 1),
 )
 back_session_managment = get_keyboard(
     SESSION_MANAGMENT_KB_NAMES["back_session_managment"],
@@ -672,7 +669,9 @@ class SessionState(StatesGroup):
     edit_instructions = State()
     get_free_accounts = State()
     select_free_account = State()
-
+    add_next_prompt = State()
+    edit_next_prompt = State()
+    
     remove_session = State()
 
     texts = {
@@ -695,7 +694,6 @@ async def session_panel(message: Message, state: FSMContext):
 
 
 # add session
-@router.message(StateFilter(None), SESSION_MANAGMENT_KB_NAMES["add_session"] == F.text)
 async def add_session_first(
     message: Message, state: FSMContext, continue_session=False
 ):
@@ -831,7 +829,7 @@ async def add_session_fifth(message: Message, state: FSMContext):
                 await state.clear()
                 return
             else:
-                await state.set_data(
+                await state.update_data(
                     {"session_id": add_session.id, "unique_users_count": unique_users_count}
                 )
                 await add_session_sixth(message, state)
@@ -854,7 +852,7 @@ async def add_session_fifth_wrong(message: types.Message):
 @router.message(SessionState.get_free_accounts)
 async def add_session_sixth(message: Message, state: FSMContext):
     accounts = await rq.orm_get_free_accounts()
-    session = await rq.orm_get_session(await state.get_value("session_id"))
+    session = await rq.orm_get_session(int(await state.get_value("session_id")))
     unique_users_count = await state.get_value("unique_users_count")
     btns = {}
 
@@ -980,10 +978,20 @@ async def session_settings(callback: CallbackQuery, state: FSMContext):
                 if not session.is_dialog_created:
                     btns["Створити діалог"] = f"start_dialog_{session.id}"
                 else:
-                    if session.is_active:
-                        btns["Зупинити сесію"] = f"stop_session_{session.id}"
+                    if not session.next_prompt:
+                        btns["Добавити промпт для нових діалогів"] = f"add_next_prompt_{session.id}"
                     else:
-                        btns["Розпочати сесію"] = f"start_session_{session.id}"
+                        if session.is_active:
+                            btns["Зупинити сесію"] = f"stop_session_{session.id}"
+                        else:
+                            btns["Розпочати сесію"] = f"start_session_{session.id}"
+                        
+                        text += f"Промпт для нових діалогів:\n"
+                        for i in ast.literal_eval(session.next_prompt):
+                            text += f"{i}\n\n"
+                        
+                        btns['Редагувати аккаунти'] = f"edit_accounts_{session.id}"
+                        btns["Редагувати промпт для нових діалогів"] = f"edit_next_prompt_{session.id}"
         else:
             btns["Добавити аккаунти"] = f"add_accounts_to_session_{session.id}"
             await state.update_data(unique_users_count=unique_users_count)
@@ -994,6 +1002,154 @@ async def session_settings(callback: CallbackQuery, state: FSMContext):
             text, reply_markup=get_callback_btns(btns=btns, sizes=(1,))
         )
 
+@router.callback_query(F.data.startswith("edit_accounts_"))
+async def edit_accounts(callback: CallbackQuery, state: FSMContext):
+    session_id = int(callback.data.split("_")[-1])
+    await state.update_data(session_id=session_id)
+    
+    dialogs = await rq.orm_get_dialogs(session_id=int(session_id))
+    
+    account_ids = {dialog.account_id for dialog in dialogs}
+    
+    await state.update_data(account_ids=account_ids)
+    
+    accounts = await rq.orm_get_account_by_ids(list(account_ids))
+    btns = {}
+    
+    if not accounts:
+        await callback.message.edit_text("Немає аккаунтів", reply_markup=session_managment)
+        return
+    
+    for account in accounts:
+        btns[account.number] = f"change_account_{account.id}"
+    
+    await callback.message.edit_text("Список аккаунтів:", reply_markup=get_callback_btns(btns=btns, sizes=(1,)))
+    
+@router.callback_query(F.data.startswith("change_account_"))
+async def change_account(callback: CallbackQuery, state: FSMContext):
+    old_account_id = int(callback.data.split("_")[-1])
+    await state.update_data(old_account_id=old_account_id)
+    
+    used_account_ids = await state.get_value("account_ids")
+    accounts = await rq.orm_get_all_accounts_authorized()
+    btns = {}
+    
+    for account in accounts:
+        if account.id not in used_account_ids:
+            btns[account.number] = f"replace_account_{account.id}"
+    
+    await callback.message.edit_text("Замінити аккаунт", reply_markup=get_callback_btns(btns=btns, sizes=(1,)))
+
+@router.callback_query(F.data.startswith("replace_account_"))
+async def change_account(callback: CallbackQuery, state: FSMContext):
+    choose_account_id = int(callback.data.split("_")[-1])
+    session_id = int(await state.get_value("session_id"))
+    old_account_id = int(await state.get_value("old_account_id"))
+    
+    session = await rq.orm_get_session(session_id)
+    account_list = session.accounts
+    
+    for account in account_list:
+        if account == str(old_account_id):
+            account_list[account_list.index(account)] = str(choose_account_id)
+    
+    result_dialogs = await rq.orm_update_dialogs_account_id(session_id, old_account_id, choose_account_id)
+    result_session = await rq.orm_update_session(session_id, accounts=account_list)
+    
+    if result_dialogs and result_session:
+        await callback.answer('Замінено аккаунт')
+        await session_settings_back(callback.message, state, session_id)
+    else:
+        await callback.message.answer("Щось пішло не так.. Спробуйте знову", reply_markup=session_managment)
+    
+    await state.clear()
+    
+
+
+@router.callback_query(F.data.startswith("edit_next_prompt_"))
+async def edit_next_prompt(callback: CallbackQuery, state: FSMContext):
+    session_id = int(callback.data.split("_")[-1])
+    await state.update_data(session_id=session_id)
+    
+    await callback.message.edit_text("Введіть промпт для нових діалогів:")
+    await state.set_state(SessionState.edit_next_prompt)
+
+@router.message(SessionState.edit_next_prompt)
+async def edit_next_prompt(message: Message, state: FSMContext):
+    new_next_prompt = message.text
+    data = await state.get_data()
+    session_id = data["session_id"]
+    session = await rq.orm_get_session(int(session_id))
+    next_prompt = ast.literal_eval(session.next_prompt)
+    next_prompt.append(new_next_prompt)
+    
+    await rq.orm_update_session(int(session_id), next_prompt=str(next_prompt))
+
+    await message.answer("Промпт успішно змінено", reply_markup=session_managment)
+    await session_settings_back(message, state, int(session_id))
+
+@router.callback_query(F.data.startswith("add_next_prompt_"))
+async def add_next_prompt(callback: CallbackQuery, state: FSMContext):
+    session_id = int(callback.data.split("_")[-1])
+    await state.update_data(session_id=session_id)
+    
+    await callback.message.edit_text("Введіть промпт для нових діалогів:")
+    await state.set_state(SessionState.add_next_prompt)
+
+@router.message(SessionState.add_next_prompt)
+async def add_next_prompt(message: Message, state: FSMContext):
+    next_prompt = message.text
+    data = await state.get_data()
+    session_id = data["session_id"]
+    await rq.orm_update_session(int(session_id), next_prompt=f"[\"{next_prompt}\"]")
+
+    await message.answer("Промпт успішно додано", reply_markup=session_managment)
+    await session_settings_back(message, state, int(session_id))
+    
+async def session_settings_back(message: Message, state: FSMContext, session_id: int):
+    session = await rq.orm_get_session(session_id)
+
+    if session:
+        data_list = ast.literal_eval(session.data)
+        user_ids = {message["user_id"] for message in data_list}
+        unique_users_count = len(user_ids)
+        text = f"Активна сесія: {'✅' if session.is_active else '❌'}\nID: <code>{session.id}</code>\nСесія: {session.session_type}\nЧат: {session.chat_url}\nЧас відповіді: {session.answer_time}\n"
+        btns = {}
+
+        if session.accounts:
+            if unique_users_count > len(session.accounts):
+                btns["Добавити аккаунти"] = f"add_accounts_to_session_{session.id}"
+                await state.update_data(unique_users_count=unique_users_count)
+            else:
+                if session.instructions:
+                    text += f"Інструкція: {session.instructions}"
+
+                if not session.is_dialog_created:
+                    btns["Створити діалог"] = f"start_dialog_{session.id}"
+                else:
+                    if not session.next_prompt:
+                        btns["Добавити промпт для нових діалогів"] = f"add_next_prompt_{session.id}"
+                    else:
+                        if session.is_active:
+                            btns["Зупинити сесію"] = f"stop_session_{session.id}"
+                        else:
+                            btns["Розпочати сесію"] = f"start_session_{session.id}"
+                        
+                        text += f"Промпт для нових діалогів:\n"
+                        for i in ast.literal_eval(session.next_prompt):
+                            text += f"{i}\n\n"
+                        
+                        btns['Редагувати аккаунти'] = f"edit_accounts_{session.id}"
+                        btns["Редагувати промпт для нових діалогів"] = f"edit_next_prompt_{session.id}"
+        else:
+            btns["Добавити аккаунти"] = f"add_accounts_to_session_{session.id}"
+            await state.update_data(unique_users_count=unique_users_count)
+
+        btns["Назад"] = "session_list"
+
+        await message.answer(
+            text, reply_markup=get_callback_btns(btns=btns, sizes=(1,))
+        )
 
 @router.callback_query(F.data.startswith("add_accounts_to_session_"))
 async def add_accounts_to_session(callback: CallbackQuery, state: FSMContext):
@@ -1160,7 +1316,7 @@ class GPTSessionState(StatesGroup):
     user_message = State()
 
 
-@router.message(SESSION_MANAGMENT_KB_NAMES["create_dialog"] == F.text)
+@router.message(SESSION_MANAGMENT_KB_NAMES["add_session"] == F.text)
 async def create_dialog(message: Message, state: FSMContext, gpt_back=False):
     if not gpt_back:
         user = await rq.orm_get_user(message.from_user.id)
